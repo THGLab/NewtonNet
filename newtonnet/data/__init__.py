@@ -2,6 +2,6 @@
 
 """
 
-from combust.data.loader import *
-from combust.data.neighbors import *
-from combust.data.parse_raw import *
+from newtonnet.data.loader import *
+from newtonnet.data.neighbors import *
+from newtonnet.data.parse_raw import *
