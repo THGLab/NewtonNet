@@ -16,6 +16,7 @@ def get_activation_by_string(key):
         raise NotImplementedError("The activation function '%s' is unknown."%str(key))
     return activation
 
+
 def swish(x):
     r"""Compute the self-gated Swish activation function.
 
@@ -31,9 +32,10 @@ def swish(x):
     """
     return x * torch.sigmoid(x)
 
+
 def shifted_softplus(x):
     r"""Compute shifted soft-plus activation function.
-    As it is used in the https://github.com/atomistic-machine-learning/schnetpack
+    Copied from: https://github.com/atomistic-machine-learning/schnetpack under the MIT License.
 
     .. math::
        y = \ln\left(1 + e^{-x}\right) - \ln(2)
@@ -46,6 +48,7 @@ def shifted_softplus(x):
 
     """
     return nn.functional.softplus(x) - np.log(2.0)
+
 
 def gelu(x):
     r"""Compute the gaussian error linear unit (GELU) activation function.
