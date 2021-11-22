@@ -66,6 +66,7 @@ class BatchDataset(Dataset):
     def __len__(self):
         return self.R.size()[0]
 
+
 def batch_dataset_converter(input, device):
     result = {}
     result["R"] = torch.tensor(input['R'],
@@ -137,6 +138,7 @@ def batch_dataset_converter(input, device):
     if "labels" in input:
         result["labels"] = input["labels"]
     return result
+
 
 def extensive_train_loader(data,
                            env_provider=None,

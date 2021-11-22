@@ -2,4 +2,4 @@
 
 """
 
-from combust.train.trainer import *
+from newtonnet.train.trainer import *
