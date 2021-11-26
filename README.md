@@ -2,25 +2,24 @@
 A Newtonian message passing network for deep learning of interatomic potentials and forces
 
 ## Installation and Dependencies
-The developer installation is available and for that you need to first clone NewtonNet repository:
-
-    git clone git@github.com:THGLab/NewtonNet.git
-
-and then run the following command inside the NewtonNet repository:
-
-    pip install -e .
-
-
-We recommend using conda environment to install dependencies of this library.
+We recommend using conda environment to install dependencies of this library first.
 Please install (or load) conda and then proceed with the following commands:
 
     conda create --name newtonnet python=3.7
-    conda activate torch-gpu
+    conda activate newtonnet
     conda install -c conda-forge numpy scipy scikit-learn pandas ase tqdm
     pip install pyyaml
 
 You also need to install Pytorch based on your hardware (we support both cpu and gpu) and the command line 
 provided on the official website: https://pytorch.org/get-started/locally/
+
+Now, you can install NewtonNet in the conda environment by cloning this repository:
+
+    git clone git@github.com:THGLab/NewtonNet.git
+
+and then runnig the following command inside the NewtonNet repository (where you have access to setup.py):
+
+    pip install -e .
 
 Once you finished installations succesfully, you will be able to run NewtonNet modules
 anywhere on your computer as long as the `newtonnet` environment is activated.
