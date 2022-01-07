@@ -5,8 +5,8 @@ general:
   output: [local/ccsd/test , 1]                 # path and iterator for the output directory
 
 data:
-  train_path: /home/jerry/data/MLFF/md17/ethanol_ccsd_t-train.npz   # path to the training data
-  test_path: /home/jerry/data/MLFF/md17/ethanol_ccsd_t-test.npz     # path to the test data
+  train_path: /home/data/MLFF/md17/toluene_ccsd_t-train.npz   # path to the training data
+  test_path: /home/data/MLFF/md17/toluene_ccsd_t-test.npz     # path to the test data
   cutoff: 5.0                 # cutoff radius
   train_size: 950             # training set size: to sample randomly
   val_size: 49                # validation set size: to sample randomly
@@ -24,6 +24,7 @@ model:
   w_f_dir: 1.0                # the weight of force direction loss in the loss function
   resolution: 20              # number of basis functions that describe interatomic distances
   n_features: 128             # number of features
+  max_z: 10                   # maximum atomic number in the chemical systems
   n_interactions: 3           # number of interaction blocks of newtonnet
   cutoff_network: poly        # the cutoff function: poly (polynomial), cosine
   normalize_atomic: False     # if True the atomic energy needs to be inverse normalized, otherwise total energy will be scaled back

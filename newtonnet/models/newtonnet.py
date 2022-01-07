@@ -19,10 +19,13 @@ class NewtonNet(nn.Module):
         number of radial functions to describe interatomic distances
 
     n_features: int
-        number of neurons in the latent layer. This number will remain fixed in the entire modeling except for the last
-        fully connected network that infers atomic energies.
+        number of neurons in the latent layer. This number will remain fixed in the entire network except
+        for the last fully connected network that predicts atomic energies.
 
-    activation:
+    activation: function
+        activation function from newtonnet.layers.activations
+        you can aslo get it by string from newtonnet.layers.activations.get_activation_by_string
+
     n_interactions: int, default: 3
         number of interaction blocks
     dropout
