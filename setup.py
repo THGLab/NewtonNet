@@ -21,6 +21,7 @@ if __name__ == "__main__":
         "A Newtonian message passing network for deep learning of interatomic potentials and forces",
         long_description=long_description,
         long_description_content_type="text/markdown",
+        scripts=['lib/newtonnet_train', 'lib/newtonnet_predict'],
         keywords=[
             'Machine Learning', 'Data Mining', 'Quantum Chemistry',
             'Molecular Dynamics'
