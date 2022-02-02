@@ -60,7 +60,8 @@ class NewtonNet(nn.Module):
                  layer_norm=False,
                  atomic_properties_only=False,
                  double_update_latent=True,
-                 pbc=False):
+                 pbc=False,
+                 aggregration='sum'):
 
         super(NewtonNet, self).__init__()
 
@@ -144,6 +145,7 @@ class NewtonNet(nn.Module):
                                         device=device))
 
         self.atomic_properties_only = atomic_properties_only
+        self.aggregration = aggregration
 
     def forward(self, data):
 
@@ -217,7 +219,12 @@ class NewtonNet(nn.Module):
 
         # inverse normalize
         Ei = Ei * AM[..., None]  # (B,A,1)
-        E = torch.sum(Ei, 1)  # (B,1)
+        if self.aggregration == 'sum':
+            E = torch.sum(Ei, 1)  # (B,1)
+        elif self.aggregration == 'mean':
+            E = torch.mean(Ei, 1)
+        elif self.aggregration == 'max':
+            E = torch.max(Ei, 1).values
         if not self.normalize_atomic:
             E = self.inverse_normalize(E)
 

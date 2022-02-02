@@ -45,7 +45,8 @@ model = NewtonNet(resolution=settings['model']['resolution'],
                shared_interactions=settings['model']['shared_interactions'],
                return_latent=settings['model']['return_latent'],
                double_update_latent=settings['model']['double_update_latent'],
-               layer_norm=settings['model']['layer_norm']
+               layer_norm=settings['model']['layer_norm'],
+               aggregration=settings['model']['aggregration']
                )
 
 # laod pre-trained model
