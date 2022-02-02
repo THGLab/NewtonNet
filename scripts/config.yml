@@ -33,6 +33,8 @@ model:
   return_latent: True         # if True, the latent space will be returned for the future investigation
   double_update_latent: False #
   layer_norm: False           # normalize hidden layer with a 1D layer_norm function
+  aggregration: sum           # aggregration function to use if the prediction may not be represented as the sum of atomic components. 
+                              # Options are: sum, mean, max
 
 training:
   epochs: 5000                # number of times the entire training data will be shown to the model
