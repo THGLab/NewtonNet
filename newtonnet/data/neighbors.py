@@ -12,7 +12,7 @@ import numpy as np
 from ase import Atoms
 from ase.neighborlist import neighbor_list
 
-from combust.utils import padaxis
+from newtonnet.utils import padaxis
 
 class ExtensiveEnvironment(object):
     """
