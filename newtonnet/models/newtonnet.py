@@ -41,8 +41,6 @@ class NewtonNet(nn.Module):
     return_latent
     """
 
-    # test comment
-
     def __init__(self,
                  resolution,
                  n_features,
@@ -72,6 +70,8 @@ class NewtonNet(nn.Module):
         self.normalize_atomic = normalize_atomic
         self.return_intermediate = return_latent
         self.pbc = pbc
+
+        # test
 
         shell_cutoff = None
         if pbc:
