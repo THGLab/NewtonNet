@@ -7,8 +7,6 @@ from sklearn.utils import random
 from sklearn.utils.random import sample_without_replacement
 from sklearn.model_selection import train_test_split
 
-from newtonnet.utils.utility import standardize_batch
-from newtonnet.utils import DataManager, parse_irc_data
 from newtonnet.data import ExtensiveEnvironment, PeriodicEnvironment
 from newtonnet.data import extensive_train_loader, extensive_loader_rotwise
 
