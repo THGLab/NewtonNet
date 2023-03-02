@@ -41,6 +41,8 @@ class NewtonNet(nn.Module):
     return_latent
     """
 
+    # test comment
+
     def __init__(self,
                  resolution,
                  n_features,
