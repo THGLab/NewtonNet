@@ -147,7 +147,7 @@ class Trainer:
         script_out = os.path.join(self.output_path, 'run_scripts')
         os.makedirs(script_out)
         shutil.copyfile(yml_path, os.path.join(script_out,os.path.basename(yml_path)))
-        shutil.copyfile(script_name, os.path.join(script_out,script_name))
+        shutil.copyfile(script_name, os.path.join(script_out,os.path.basename(script_name)))
 
     def _hooks(self, hooks):
         hooks_list = []
