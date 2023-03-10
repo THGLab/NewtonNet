@@ -31,6 +31,7 @@ class Trainer:
                  energy_loss_w,
                  force_loss_w,
                  loss_wf_decay,
+                 lambda_l1,
                  checkpoint_log=1,
                  checkpoint_val=1,
                  checkpoint_test=20,
@@ -49,6 +50,7 @@ class Trainer:
         self.energy_loss_w = energy_loss_w
         self.force_loss_w = force_loss_w
         self.wf_lambda = lambda epoch: np.exp(-epoch * loss_wf_decay)
+        self.lambda_l1 = lambda_l1
 
         if type(device) is list and len(device) > 1:
             self.multi_gpu = True
@@ -563,6 +565,9 @@ class Trainer:
                 loss = self.loss_fn(preds, train_batch,
                                     w_e=self.energy_loss_w,
                                     w_f=w_f)
+                for param in self.model.parameters():
+                    if param.requires_grad:
+                        loss = loss + self.lambda_l1 * param.abs().sum()
                 loss.backward()
                 if clip_grad>0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
