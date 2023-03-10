@@ -122,6 +122,7 @@ w_energy = settings['model']['w_energy']
 w_force = settings['model']['w_force']
 w_f_mag = settings['model']['w_f_mag']
 w_f_dir = settings['model']['w_f_dir']
+lambda_l1 = settings['model']['lambda_l1']
 
 def custom_loss(preds, batch_data, w_e=w_energy, w_f=w_force, w_fm=w_f_mag, w_fd=w_f_dir):
 
@@ -176,6 +177,7 @@ trainer = Trainer(model=model,
                   energy_loss_w= w_energy,
                   force_loss_w=w_force,
                   loss_wf_decay=settings['model']['wf_decay'],
+                  lambda_l1=lambda_l1,
                   checkpoint_log=settings['checkpoint']['log'],
                   checkpoint_val=settings['checkpoint']['val'],
                   checkpoint_test=settings['checkpoint']['test'],
