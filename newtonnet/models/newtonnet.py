@@ -240,16 +240,16 @@ class NewtonNet(nn.Module):
                 retain_graph=True
             )[0]
 
-            # ddE = torch.zeros(E.shape[0], R.shape[1], R.shape[2], R.shape[1], R.shape[2])
-            # for A_ in range(R.shape[1]):
-            #     for X_ in range(3):
-            #         ddE[:, A_, X_, :, :] = grad(
-            #             dE[:, A_, X_],
-            #             R,
-            #             grad_outputs=torch.ones(E.shape[0]),
-            #             create_graph=self.create_graph,
-            #             retain_graph=True
-            #         )[0]
+            ddE = torch.zeros(E.shape[0], R.shape[1], R.shape[2], R.shape[1], R.shape[2])
+            for A_ in range(R.shape[1]):
+                for X_ in range(3):
+                    ddE[:, A_, X_, :, :] = grad(
+                        dE[:, A_, X_],
+                        R,
+                        grad_outputs=torch.ones(E.shape[0]),
+                        create_graph=self.create_graph,
+                        retain_graph=True
+                    )[0]
 
             dE = -1.0 * dE
 
@@ -257,9 +257,9 @@ class NewtonNet(nn.Module):
             dE = data['F']
 
         if self.return_intermediate:
-            return {'E': E, 'F': dE, 'Ei': Ei, 'hs': hs, 'F_latent': f_dir}
+            return {'R': R, 'E': E, 'F': dE, 'H': ddE, 'Ei': Ei, 'hs': hs, 'F_latent': f_dir}
         else:
-            return {'E': E, 'F': dE, 'Ei': Ei, 'F_latent': f_dir}
+            return {'R': R, 'E': E, 'F': dE, 'H': ddE, 'Ei': Ei, 'F_latent': f_dir}
 
 
 class DynamicsCalculator(nn.Module):
