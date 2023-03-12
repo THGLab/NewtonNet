@@ -77,8 +77,7 @@ elif parser in ['hydrogen']:
     train_mode = 'energy/force'
     print('data set:', 'Methane Combustion')
 elif parser in ['t1x']:
-    train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, n_train_data, n_val_data, n_test_data, normalizer, test_energy_hash = parse_t1x_data(
-        settings, device[0])
+    train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, normalizer = parse_t1x_data(settings, device[0])
     train_mode = 'energy/force'
     print('data set:', 'Transition1x')
 
@@ -146,7 +145,7 @@ def custom_loss(preds, batch_data, w_e=w_energy, w_f=w_force, w_fm=w_f_mag, w_fd
 
     if w_fd > 0:
         cos = torch.nn.CosineSimilarity(dim=-1, eps=1e-6)
-        direction_diff = 1 - cos(preds['hs'][-1][1], batch_data["F"])
+        direction_diff = 1 - cos(preds['F_latent'], batch_data["F"])
         # direction_diff = direction_diff * torch.norm(batch_data["F"], p=2, dim=-1)
         direction_loss = torch.mean(direction_diff)
         err_sq = err_sq + w_fd * direction_loss
