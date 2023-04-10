@@ -56,7 +56,7 @@ class NewtonNet(nn.Module):
                  device=None,
                  create_graph=False,
                  shared_interactions=False,
-                 return_latent=False,
+                 return_hessian=False,
                  layer_norm=False,
                  atomic_properties_only=False,
                  double_update_latent=True,
@@ -68,7 +68,7 @@ class NewtonNet(nn.Module):
         self.requires_dr = requires_dr
         self.create_graph = create_graph
         self.normalize_atomic = normalize_atomic
-        self.return_intermediate = return_latent
+        self.return_hessian = return_hessian
         self.pbc = pbc
 
         # test
@@ -172,10 +172,6 @@ class NewtonNet(nn.Module):
         if self.requires_dr:
             R.requires_grad_()
 
-        # store intermediate representations
-        if self.return_intermediate:
-            hs = [(a,)]
-
         # compute distances (B,A,N) and distance vectors (B,A,N,3)
         if 'D' in data:
             distances = data['D']
@@ -199,9 +195,6 @@ class NewtonNet(nn.Module):
 
             if self.layer_norm:
                 a = self.norm[i_interax](a)
-
-            if self.return_intermediate:
-                hs.append((a, f_dir, f_dynamics, r_dynamics, e_dynamics))
 
         # When using the network to obtain atomic properties only
         if self.atomic_properties_only:
@@ -240,7 +233,7 @@ class NewtonNet(nn.Module):
                 retain_graph=True
             )[0]
             
-            if self.return_intermediate:
+            if self.return_hessian:
                 ddE = torch.zeros(E.shape[0], R.shape[1], R.shape[2], R.shape[1], R.shape[2], device=R.device)
                 for A_ in range(R.shape[1]):
                     for X_ in range(3):
@@ -257,8 +250,8 @@ class NewtonNet(nn.Module):
         else:
             dE = data['F']
 
-        if self.return_intermediate:
-            return {'R': R, 'E': E, 'F': dE, 'H': ddE, 'Ei': Ei, 'hs': hs, 'F_latent': f_dir}
+        if self.return_hessian:
+            return {'R': R, 'E': E, 'F': dE, 'H': ddE, 'Ei': Ei, 'F_latent': f_dir}
         else:
             return {'R': R, 'E': E, 'F': dE, 'Ei': Ei, 'F_latent': f_dir}
 
