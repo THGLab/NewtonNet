@@ -733,9 +733,9 @@ def parse_t1x_data(settings, device):
 
 
     # read data
-    dtrain = np.load(train_path)
-    dval = np.load(val_path)
-    dtest = np.load(test_path)
+    dtrain = dict(np.load(train_path))
+    dval = dict(np.load(val_path))
+    dtest = dict(np.load(test_path))
 
     # convert unit
     # dtrain['E'] = dtrain['E'] * 23.061
@@ -744,6 +744,26 @@ def parse_t1x_data(settings, device):
     # dval['F'] = dval['F'] * 23.061
     # dtest['E'] = dtest['E'] * 23.061
     # dtest['F'] = dtest['F'] * 23.061
+    
+    # sample data
+    if settings['data']['train_size'] != -1:
+        n_select = sample_without_replacement(dtrain['R'].shape[0], 
+                                              settings['data']['train_size'], 
+                                              random_state=settings['data']['random_states'])
+        for key in dtrain.keys():
+            dtrain[key] = dtrain[key][n_select]
+    if settings['data']['val_size'] != -1:
+        n_select = sample_without_replacement(dval['R'].shape[0], 
+                                              settings['data']['val_size'], 
+                                              random_state=settings['data']['random_states'])
+        for key in dval.keys():
+            dval[key] = dval[key][n_select]
+    if settings['data']['test_size'] != -1:
+        n_select = sample_without_replacement(dtest['R'].shape[0], 
+                                              settings['data']['test_size'], 
+                                              random_state=settings['data']['random_states'])
+        for key in dtest.keys():
+            dtest[key] = dtest[key][n_select]
 
     # extract data stats
     normalizer = (dtrain['E'].mean(), dtrain['E'].std())

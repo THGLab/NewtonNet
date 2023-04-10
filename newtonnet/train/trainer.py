@@ -562,12 +562,10 @@ class Trainer:
                 # self.model.module(train_batch)
                 # preds = self.model.forward(train_batch)
                 preds = self.model(train_batch)
-                loss = self.loss_fn(preds, train_batch,
+                loss = self.loss_fn(preds, train_batch, self.model.parameters(),
                                     w_e=self.energy_loss_w,
-                                    w_f=w_f)
-                for param in self.model.parameters():
-                    if param.requires_grad:
-                        loss = loss + self.lambda_l1 * param.abs().sum()
+                                    w_f=w_f,
+                                    lambda_l1=self.lambda_l1)
                 loss.backward()
                 if clip_grad>0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
