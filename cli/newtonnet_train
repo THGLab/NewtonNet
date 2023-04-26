@@ -101,7 +101,7 @@ model = NewtonNet(resolution=settings['model']['resolution'],
                device=device[0],
                create_graph=True,
                shared_interactions=settings['model']['shared_interactions'],
-               return_latent=settings['model']['return_latent'],
+               return_hessian=settings['model']['return_hessian'],
                double_update_latent=settings['model']['double_update_latent'],
                layer_norm=settings['model']['layer_norm']
                )

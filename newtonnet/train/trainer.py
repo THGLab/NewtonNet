@@ -133,8 +133,8 @@ class Trainer:
         os.makedirs(out_path)
         self.output_path = out_path
 
-        self.val_out_path = os.path.join(self.output_path, 'validation')
-        os.makedirs(self.val_out_path)
+        # self.val_out_path = os.path.join(self.output_path, 'validation')
+        # os.makedirs(self.val_out_path)
 
         # subdir for computation graph
         self.graph_path = os.path.join(self.output_path, 'graph')
@@ -685,15 +685,15 @@ class Trainer:
                     outputs = self.validation('irc', irc_generator, irc_steps)
                     irc_mae_E = np.mean(outputs['E_ae'])
                     irc_mae_F = np.mean(outputs['F_ae_masked'])
-                    np.save(os.path.join(self.val_out_path, 'irc_ae_E'), outputs['E_ae'])
-                    np.save(os.path.join(self.val_out_path, 'irc_ae_F'), outputs['F_ae'])
-                    np.save(os.path.join(self.val_out_path, 'irc_pred_E'), outputs['E_pred'])
-                    np.save(os.path.join(self.val_out_path, 'irc_pred_F'), outputs['F_pred'])
-                    np.save(os.path.join(self.val_out_path, 'irc_E'), outputs['E'])
-                    np.save(os.path.join(self.val_out_path, 'irc_F'), outputs['F'])
-                    np.save(os.path.join(self.val_out_path, 'irc_Ei_best'), outputs['Ei'])
-                    np.save(os.path.join(self.val_out_path, 'irc_AM'), outputs['AM'])
-                    np.save(os.path.join(self.val_out_path, 'irc_RM'), outputs['RM'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_ae_E'), outputs['E_ae'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_ae_F'), outputs['F_ae'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_pred_E'), outputs['E_pred'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_pred_F'), outputs['F_pred'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_E'), outputs['E'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_F'), outputs['F'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_Ei_best'), outputs['Ei'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_AM'), outputs['AM'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_RM'), outputs['RM'])
                     # np.save(os.path.join(self.val_out_path, 'irc_Ei_epoch%i'%self.epoch), outputs['Ei'])
 
                 # save test predictions
@@ -702,17 +702,17 @@ class Trainer:
                         outputs = self.validation('test', test_generator, test_steps)
                         test_mae_E = np.mean(outputs['E_ae'])
                         test_mae_F = np.mean(outputs['F_ae_masked'])
-                        np.save(os.path.join(self.val_out_path, 'test_ae_E'), outputs['E_ae'])
-                        np.save(os.path.join(self.val_out_path, 'test_ae_F'), outputs['F_ae'])
-                        np.save(os.path.join(self.val_out_path, 'test_pred_E'), outputs['E_pred'])
-                        np.save(os.path.join(self.val_out_path, 'test_pred_F'), outputs['F_pred'])
-                        np.save(os.path.join(self.val_out_path, 'test_E'), outputs['E'])
-                        np.save(os.path.join(self.val_out_path, 'test_F'), outputs['F'])
-                        np.save(os.path.join(self.val_out_path, 'test_AM'), outputs['AM'])
-                        np.save(os.path.join(self.val_out_path, 'test_RM'), outputs['RM'])
+                        # np.save(os.path.join(self.val_out_path, 'test_ae_E'), outputs['E_ae'])
+                        # np.save(os.path.join(self.val_out_path, 'test_ae_F'), outputs['F_ae'])
+                        # np.save(os.path.join(self.val_out_path, 'test_pred_E'), outputs['E_pred'])
+                        # np.save(os.path.join(self.val_out_path, 'test_pred_F'), outputs['F_pred'])
+                        # np.save(os.path.join(self.val_out_path, 'test_E'), outputs['E'])
+                        # np.save(os.path.join(self.val_out_path, 'test_F'), outputs['F'])
+                        # np.save(os.path.join(self.val_out_path, 'test_AM'), outputs['AM'])
+                        # np.save(os.path.join(self.val_out_path, 'test_RM'), outputs['RM'])
                     elif self.mode == "atomic_properties":
                         outputs = self.validation_atomic_properties('test', "CS", test_generator, test_steps)
-                        torch.save(outputs, os.path.join(self.val_out_path, 'test_results.pkl'))
+                        # torch.save(outputs, os.path.join(self.val_out_path, 'test_results.pkl'))
                         test_error = outputs["RMSE"]
                     last_test_epoch = self.epoch
                     # np.save(os.path.join(self.val_out_path, 'test_Ei_epoch%i'%self.epoch), outputs['Ei'])
