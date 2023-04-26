@@ -14,12 +14,10 @@ from newtonnet.data import batch_dataset_converter
 ##     ML model ASE interface
 ##--------------------------------------
 class MLAseCalculator(Calculator):
-    implemented_properties = ['energy', 'forces'] #, 'stress'
-    # default_parameters = {'xc': 'ani'}
-    # nolabel = True
+    implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, **kwargs):
+    def __init__(self, model_path, settings_path, mode='autograd', diff_precision=0.01, device='cpu', **kwargs):
         """
         Constructor for MLAseCalculator
 
@@ -29,62 +27,62 @@ class MLAseCalculator(Calculator):
             path to the model. eg. '5k/models/best_model_state.tar'
         settings_path: str
             path to the .yml setting path. eg. '5k/run_scripts/config_h2.yml'
-        model_type: str
-            type of model. Default to NewtonNet(MNMP) Options: ['NewtonNet','EquiNet','DRFFM','MNMP']
-        lattice: array of (9,)
-            lattice vector for pbc
+        mode: str
+            hessian calculation mode. eg. 'autograd', 'forward_diff'
+        device: 
+            device to run model eg. 'cpu', ['cuda:0', 'cuda:1']
         kwargs
         """
         Calculator.__init__(self, **kwargs)
         self.settings = yaml.safe_load(open(settings_path, "r"))
-        self.lattice = None
 
-        # device
-        self.device = [torch.device('cpu')]
+        if type(device) is list:
+            self.device = [torch.device(item) for item in device]
+        else:
+            self.device = [torch.device(device)]
+
+        if mode=='autograd':
+            self.mode = mode 
+        elif mode=='forward_diff':
+            self.mode = mode
+            self.diff_precision = diff_precision 
+        else:
+            raise ValueError('Unexpected mode for hessian calculation.')
 
         torch.set_default_tensor_type(torch.DoubleTensor)
-
         self._load_model(model_path)
+
 
     def calculate(self, atoms=None, properties=['energy','forces','hessian'],system_changes=None):
         super().calculate(atoms,properties,system_changes)
-        data = data_formatter(atoms, self.lattice)
+        data = self.data_formatter(atoms)
         pred = self.predict(data)
-        energy = pred['E'][0][0].data.cpu().numpy()
-        energy = float(energy) * kcal / mol
-        forces = pred['F'][0].data.cpu().numpy()
-        forces =  forces * kcal / mol / Ang
-        hessian = pred['H'][0].data.cpu().numpy()
+        energy = pred['E'].data.cpu().numpy()
+        forces = pred['F'].data.cpu().numpy()
+        if self.mode=='autograd':
+            hessian = pred['H'].data.cpu().numpy()
+        elif self.mode=='forward_diff':
+            hessian = np.zeros((1, forces.shape[1], 3, forces.shape[1], 3))
+            n = 1
+            for A_ in range(forces.shape[1]):
+                for X_ in range(3):
+                    hessian[0, A_, X_, :, :] = -(forces[n] - forces[0]) / self.diff_precision
+                    n += 1
+        energy = energy * kcal / mol
+        forces = forces * kcal / mol / Ang
         hessian =  hessian * kcal / mol / Ang / Ang
-        # atomic energies (au -> eV)
-        # H = -0.5004966690 * 27.211
-        # O = -75.0637742413 * 27.211
-        # n_H = np.count_nonzero(np.array(atoms.get_atomic_numbers()) == 1)
-        # n_O = np.count_nonzero(np.array(atoms.get_atomic_numbers()) == 8)
-        # atomic_energy = n_H*H +n_O*O
-        # energy+=atomic_energy
         if 'energy' in properties:
-            self.results['energy'] = energy
+            self.results['energy'] = energy[0][0]
         if 'forces' in properties:
-            self.results['forces'] = forces
+            self.results['forces'] = forces[0]
         if 'hessian' in properties:
-            self.results['hessian'] = hessian
-
+            self.results['hessian'] = hessian[0]
 
 
     def _load_model(self,model_path):
-        #load NewtonNet model
-        # settings
         settings = self.settings
-
-        # model
-        # activation function
+        return_hessian = True if self.mode=='autograd' else False
         activation = get_activation_by_string(settings['model']['activation'])
-
-        pbc = False
-        if self.lattice is not None:
-            pbc = True
-
         model = NewtonNet(resolution=settings['model']['resolution'],
                             n_features=settings['model']['n_features'],
                             activation=activation,
@@ -98,77 +96,74 @@ class MLAseCalculator(Calculator):
                             device=self.device[0],
                             create_graph=True,
                             shared_interactions=settings['model']['shared_interactions'],
-                            return_hessian=True,
+                            return_hessian=return_hessian,
                             double_update_latent=settings['model']['double_update_latent'],
                             layer_norm=settings['model']['layer_norm'],
-                            pbc=pbc
                             )
-        
-
-
 
         model.load_state_dict(torch.load(model_path, map_location=self.device[0])['model_state_dict'], )
-        # model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu'))['model_state_dict'],)
-
-
-
         self.model = model
         self.model.to(self.device[0])
         self.model.eval()
         self.model.requires_dr = True
 
 
-
-
-
     def predict(self,data_dict):
         env = ExtensiveEnvironment()
-        data_gen = extensive_data_loader(data=data_dict,
-                                          env_provider=env,
-                                          batch_size=1,  # settings['training']['val_batch_size'],
-                                          n_rotations=0, #settings['training']['val_rotations'],
-                                          device=self.device[0],)
-        val_batch = next(data_gen)
+        val_batch = extensive_data_loader(data=data_dict,
+                                         env_provider=env,
+                                         batch_size=1, 
+                                         n_rotations=0,
+                                         device=self.device[0],)
+        #val_batch = next(data_gen)
         data_preds = self.model(val_batch)
 
         return data_preds
 
 
-def data_formatter(atoms,lattice=None):
-    """
-    convert ase.Atoms to input format of the model
+    def data_formatter(self,atoms):
+        """
+        convert ase.Atoms to input format of the model
 
-    Parameters
-    ----------
-    atoms: ase.Atoms
+        Parameters
+        ----------
+        atoms: ase.Atoms
 
-    Returns
-    -------
-    data: dict
-        dictionary of arrays with following keys:
-            - 'R':positions
-            - 'Z':atomic_numbers
-            - 'E':energy
-            - 'F':forces
-    """
-    data  = {
-        'R':np.array(atoms.get_positions())[np.newaxis, ...], #shape(ndata,natoms,3)
-        'Z': np.array(atoms.get_atomic_numbers())[np.newaxis, ...], #shape(ndata,natoms)
-        'E': np.zeros((1,1)), #shape(ndata,1)
-        'F': np.zeros((1,len(atoms.get_atomic_numbers()), 3)),#shape(ndata,natoms,3)
-    }
-    if lattice is not None:
-        assert len(lattice) == 9, 'lattice for pbc should be an array of size 9'
-        data['lattice'] = np.array(lattice,dtype='float')
-    return data
+        Returns
+        -------
+        data: dict
+            dictionary of arrays with following keys:
+                - 'R':positions
+                - 'Z':atomic_numbers
+                - 'E':energy
+                - 'F':forces
+        """
+        data  = {
+            'R': np.array(atoms.get_positions())[np.newaxis, ...], #shape(ndata,natoms,3)
+            'Z': np.array(atoms.get_atomic_numbers())[np.newaxis, ...], #shape(ndata,natoms)
+            'E': np.zeros((1,1)), #shape(ndata,1)
+            'F': np.zeros((1,len(atoms.get_atomic_numbers()), 3)),#shape(ndata,natoms,3)
+        }
+        if self.mode=='forward_diff':
+            n = data['R'].size
+            data['R'] = np.tile(data['R'], (1 + n, 1, 1))
+            data['Z'] = np.tile(data['Z'], (1 + n, 1))
+            data['E'] = np.tile(data['E'], (1 + n, 1))
+            data['F'] = np.tile(data['F'], (1 + n, 1, 1))
+            n = 1
+            for A_ in range(data['R'].shape[1]):
+                for X_ in range(3):
+                    data['R'][n, A_, X_] += self.diff_precision
+                    n += 1
+        return data
 
 
 def extensive_data_loader(data,
-                           env_provider=None,
-                           batch_size=32,
-                           n_rotations=0,
-                           device=None,
-                        ):
+                          env_provider=None,
+                          batch_size=32,
+                          n_rotations=0,
+                          device=None,
+                         ):
     r"""
     The main function to load and iterate data based on the extensive environment provider.
 
@@ -216,69 +211,12 @@ def extensive_data_loader(data,
     BatchDataset: instance of BatchDataset with the all batch data
 
     """
-    n_data = data['R'].shape[0]  # D
-    n_atoms = data['R'].shape[1]  # A
-
-
-    # get neighbors
-    if env_provider is not None:
-        neighbors, neighbor_mask, atom_mask,_,_ = env_provider.get_environment(data['R'], data['Z'])
-
-    # iterate over data snapshots
-    seen_all_data = 0
-    while True:
-
-        # iterate over rotations
-        for r in range(n_rotations + 1):
-
-            # split by batch size and yield
-            data_atom_indices = list(range(n_data))
-
-
-            split = 0
-            while (split + 1) * batch_size <= n_data:
-                # Output a batch
-                data_batch_idx = data_atom_indices[split *
-                                                   batch_size:(split + 1) *
-                                                   batch_size]
-
-                # rotation
-                theta = np.array([0,0,0])
-                rot_atoms = data['R'][data_batch_idx]
-                rot_forces = data['F'][data_batch_idx]
-
-                RM = np.tile(theta, (rot_atoms.shape[0],1))
-
-                if env_provider is None:
-                    N = None
-                    NM = None
-                    Z = data['Z'][data_batch_idx]
-                    AM = np.zeros_like(Z)
-                    AM[Z != 0] = 1
-                else:
-                    N = neighbors[data_batch_idx]
-                    NM = neighbor_mask[data_batch_idx]
-                    AM = atom_mask[data_batch_idx]
-
-
-                batch_dataset = {
-                    'R': rot_atoms,   # B,A,3
-                    'Z': data['Z'][data_batch_idx], # B,A
-                    'E': data['E'][data_batch_idx], # B,1
-                    'F': rot_forces,    # B,A,3
-                    'N': N,     # B,A,A-1
-                    'NM': NM,   # B,A,A-1
-                    'AM': AM,   # B,A
-                    'RM': RM    # B,3  rotation angles only
-                }
-                if 'lattice' in data:
-                    batch_dataset['lattice'] = data['lattice']
-                # batch_dataset = BatchDataset(batch_dataset, device=device)
-                batch_dataset = batch_dataset_converter(batch_dataset, device)
-                yield batch_dataset
-                split += 1
-
-            seen_all_data += 1
+    batch = {'R': torch.tensor(data['R']),
+             'Z': torch.tensor(data['Z'])}
+    N, NM, AM, _, _ = ExtensiveEnvironment().get_environment(batch['R'].clone(), batch['Z'].clone())
+    batch.update({'N': N, 'NM': NM, 'AM': AM})
+    batch = batch_dataset_converter(batch, device=device)
+    return batch
 
 
 ##-------------------------------------
