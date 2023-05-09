@@ -60,13 +60,18 @@ class MLAseCalculator(Calculator):
                                      n_rotations=0,
                                      device=self.device[0])
         if self.mode=='autograd':
-            energy = self.model(data).detach().numpy()
-            forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().numpy()
-            hessian = F.hessian(lambda R: self.model(dict(data, R=R)), data['R']).detach().numpy()
+            #energy = self.model(data).detach().numpy()
+            #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().numpy()
+            #hessian = F.hessian(lambda R: self.model(dict(data, R=R)), data['R']).detach().numpy()
+            
+            pred = self.model(data)
+            energy = pred['E'].detach().cpu().numpy()
+            forces = pred['F'].detach().cpu().numpy()
+            hessian = pred['H'].detach().cpu().numpy()
         elif self.mode=='fwd_diff':
             pred = self.model(data)
-            energy = pred['E'].detach().numpy()
-            forces = pred['F'].detach().numpy()
+            energy = pred['E'].detach().cpu().numpy()
+            forces = pred['F'].detach().cpu().numpy()
             hessian = np.zeros((1, forces.shape[1], 3, forces.shape[1], 3))
             n = 1
             for A_ in range(forces.shape[1]):

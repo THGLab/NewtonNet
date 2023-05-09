@@ -224,8 +224,8 @@ class NewtonNet(nn.Module):
         if not self.normalize_atomic:
             E = self.inverse_normalize(E)
 
-        if self.return_hessian:
-            return E
+        #if self.return_hessian:
+        #    return E
 
         if self.requires_dr:
 
@@ -242,8 +242,8 @@ class NewtonNet(nn.Module):
                 #            create_graph=self.create_graph,
                 #            retain_graph=True
                 #        )[0]
-                #ddE = torch.Tensor([grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True)[0].detach().numpy() for V in torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1)])
-                ddE = vmap(lambda V: grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True)[0])(torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1))
+                #ddE = torch.stack([grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True)[0] for V in torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1)])
+                ddE = torch.vmap(lambda V: grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True)[0])(torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1))
                 ddE = ddE.permute(1,2,3,0).unflatten(dim=3, sizes=(-1, 3))
             dE = -1.0 * dE
 
