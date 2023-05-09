@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.autograd import grad
+#from functorch import vmap
 
 from newtonnet.layers import Dense
 from newtonnet.layers.shells import ShellProvider
@@ -223,28 +224,27 @@ class NewtonNet(nn.Module):
         if not self.normalize_atomic:
             E = self.inverse_normalize(E)
 
+        if self.return_hessian:
+            return E
+
         if self.requires_dr:
 
-            dE = grad(
-                E,
-                R,
-                grad_outputs=torch.ones_like(E),
-                create_graph=self.create_graph,
-                retain_graph=True
-            )[0]
+            dE = grad(E, R, grad_outputs=torch.ones(E.shape[0], 1, device=R.device), create_graph=self.create_graph, retain_graph=True)[0]
             
             if self.return_hessian:
-                ddE = torch.zeros(E.shape[0], R.shape[1], R.shape[2], R.shape[1], R.shape[2], device=R.device)
-                for A_ in range(R.shape[1]):
-                    for X_ in range(3):
-                        ddE[:, A_, X_, :, :] = grad(
-                            dE[:, A_, X_],
-                            R,
-                            grad_outputs=torch.ones(E.shape[0], device=R.device),
-                            create_graph=self.create_graph,
-                            retain_graph=True
-                        )[0]
-
+                #ddE = torch.zeros(E.shape[0], R.shape[1], R.shape[2], R.shape[1], R.shape[2], device=R.device)
+                #for A_ in range(R.shape[1]):
+                #    for X_ in range(3):
+                #        ddE[:, A_, X_, :, :] = grad(
+                #            dE[:, A_, X_],
+                #            R,
+                #            grad_outputs=torch.ones(E.shape[0], device=R.device),
+                #            create_graph=self.create_graph,
+                #            retain_graph=True
+                #        )[0]
+                #ddE = torch.Tensor([grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True)[0].detach().numpy() for V in torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1)])
+                ddE = vmap(lambda V: grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True)[0])(torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1))
+                ddE = ddE.permute(1,2,3,0).unflatten(dim=3, sizes=(-1, 3))
             dE = -1.0 * dE
 
         else:
@@ -291,6 +291,9 @@ class DynamicsCalculator(nn.Module):
         self.phi_f = Dense(n_features, 1, activation=None, bias=False)
         self.phi_f_scale = nn.Sequential(
             Dense(n_features, n_features, activation=activation),
+            Dense(n_features, n_features, activation=None),
+        )
+        self.phi_r = nn.Sequential(
             Dense(n_features, n_features, activation=None),
         )
         self.phi_r = nn.Sequential(

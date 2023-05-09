@@ -2,6 +2,7 @@ import numpy as np
 from ase.units import *
 from ase.calculators.calculator import Calculator
 import torch
+import torch.autograd.functional as F
 import yaml
 
 from newtonnet.layers.activations import get_activation_by_string
@@ -17,7 +18,7 @@ class MLAseCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, mode='autograd', diff_precision=0.01, device='cpu', **kwargs):
+    def __init__(self, model_path, settings_path, mode='autograd', diff_precision=0.0, device='cpu', **kwargs):
         """
         Constructor for MLAseCalculator
 
@@ -28,7 +29,7 @@ class MLAseCalculator(Calculator):
         settings_path: str
             path to the .yml setting path. eg. '5k/run_scripts/config_h2.yml'
         mode: str
-            hessian calculation mode. eg. 'autograd', 'forward_diff'
+            hessian calculation mode. eg. 'autograd', 'fwd_diff'
         device: 
             device to run model eg. 'cpu', ['cuda:0', 'cuda:1']
         kwargs
@@ -41,13 +42,11 @@ class MLAseCalculator(Calculator):
         else:
             self.device = [torch.device(device)]
 
-        if mode=='autograd':
+        if mode in ['autograd', 'fwd_diff']:
             self.mode = mode 
-        elif mode=='forward_diff':
-            self.mode = mode
-            self.diff_precision = diff_precision 
         else:
             raise ValueError('Unexpected mode for hessian calculation.')
+        self.diff_precision = diff_precision
 
         torch.set_default_tensor_type(torch.DoubleTensor)
         self._load_model(model_path)
@@ -55,28 +54,35 @@ class MLAseCalculator(Calculator):
 
     def calculate(self, atoms=None, properties=['energy','forces','hessian'],system_changes=None):
         super().calculate(atoms,properties,system_changes)
-        data = self.data_formatter(atoms)
-        pred = self.predict(data)
-        energy = pred['E'].data.cpu().numpy()
-        forces = pred['F'].data.cpu().numpy()
+        data = extensive_data_loader(data=self.data_formatter(atoms),
+                                     env_provider=ExtensiveEnvironment(),
+                                     batch_size=1, 
+                                     n_rotations=0,
+                                     device=self.device[0])
         if self.mode=='autograd':
-            hessian = pred['H'].data.cpu().numpy()
-        elif self.mode=='forward_diff':
+            energy = self.model(data).detach().numpy()
+            forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().numpy()
+            hessian = F.hessian(lambda R: self.model(dict(data, R=R)), data['R']).detach().numpy()
+        elif self.mode=='fwd_diff':
+            pred = self.model(data)
+            energy = pred['E'].detach().numpy()
+            forces = pred['F'].detach().numpy()
             hessian = np.zeros((1, forces.shape[1], 3, forces.shape[1], 3))
             n = 1
             for A_ in range(forces.shape[1]):
                 for X_ in range(3):
                     hessian[0, A_, X_, :, :] = -(forces[n] - forces[0]) / self.diff_precision
                     n += 1
+            forces = forces[0]
         energy = energy * kcal / mol
         forces = forces * kcal / mol / Ang
         hessian =  hessian * kcal / mol / Ang / Ang
         if 'energy' in properties:
-            self.results['energy'] = energy[0][0]
+            self.results['energy'] = energy.squeeze()
         if 'forces' in properties:
-            self.results['forces'] = forces[0]
+            self.results['forces'] = forces.squeeze()
         if 'hessian' in properties:
-            self.results['hessian'] = hessian[0]
+            self.results['hessian'] = hessian.squeeze()
 
 
     def _load_model(self,model_path):
@@ -144,7 +150,7 @@ class MLAseCalculator(Calculator):
             'E': np.zeros((1,1)), #shape(ndata,1)
             'F': np.zeros((1,len(atoms.get_atomic_numbers()), 3)),#shape(ndata,natoms,3)
         }
-        if self.mode=='forward_diff':
+        if self.mode=='fwd_diff':
             n = data['R'].size
             data['R'] = np.tile(data['R'], (1 + n, 1, 1))
             data['Z'] = np.tile(data['Z'], (1 + n, 1))
