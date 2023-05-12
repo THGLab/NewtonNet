@@ -223,15 +223,21 @@ class NewtonNet(nn.Module):
         if not self.normalize_atomic:
             E = self.inverse_normalize(E)
 
-        if self.return_hessian:
-            return E
+        # if self.return_hessian:
+        #     return E
 
         if self.requires_dr:
-            dE = grad(E, R, grad_outputs=torch.ones(E.shape[0], 1, device=R.device), create_graph=self.create_graph, retain_graph=True)[0]
             if self.return_hessian:
-                ddE = torch.stack([grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True)[0] for V in torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1)])
+                dE = grad(E, R, grad_outputs=torch.ones(E.shape[0], 1, device=R.device), create_graph=True, retain_graph=True)[0]
+                ddE = torch.zeros(E.shape[0], R.shape[1], R.shape[2], R.shape[1], R.shape[2], device=R.device)
+                for A_ in range(R.shape[1]):
+                    for X_ in range(3):
+                        ddE[:, A_, X_, :, :] = grad(dE[:, A_, X_], R, grad_outputs=torch.ones(E.shape[0], device=R.device), create_graph=False, retain_graph=True)[0]
+                # ddE = torch.stack([grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True, allow_unused=True)[0] for V in torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1)])
                 # ddE = torch.vmap(lambda V: grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True))(torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1))
-                ddE = ddE.permute(1,2,3,0).unflatten(dim=3, sizes=(-1, 3))
+                # ddE = ddE.permute(1,2,3,0).unflatten(dim=3, sizes=(-1, 3))
+            else:
+                dE = grad(E, R, grad_outputs=torch.ones(E.shape[0], 1, device=R.device), create_graph=self.create_graph, retain_graph=True)[0]
             dE = -1.0 * dE
         else:
             dE = data['F']
