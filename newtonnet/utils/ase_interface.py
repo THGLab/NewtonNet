@@ -18,7 +18,7 @@ class MLAseCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, mode='autograd', diff_precision=0.0, device='cpu', **kwargs):
+    def __init__(self, model_path, settings_path, grad_precision=0.0, device='cpu', **kwargs):
         """
         Constructor for MLAseCalculator
 
@@ -28,8 +28,8 @@ class MLAseCalculator(Calculator):
             path to the model. eg. '5k/models/best_model_state.tar'
         settings_path: str
             path to the .yml setting path. eg. '5k/run_scripts/config_h2.yml'
-        mode: str
-            hessian calculation mode. eg. 'autograd', 'fwd_diff'
+        grad_precision: float
+            hessian gradient calculation precision. default: 0.0, i.e. automatic differentiation 
         device: 
             device to run model eg. 'cpu', ['cuda:0', 'cuda:1']
         kwargs
@@ -42,15 +42,15 @@ class MLAseCalculator(Calculator):
         else:
             self.device = [torch.device(device)]
 
-        if mode in ['autograd', 'fwd_diff']:
-            self.mode = mode 
+        if grad_precision == 0:
+            self.mode = 'autograd'
         else:
-            raise ValueError('Unexpected mode for hessian calculation.')
-        self.diff_precision = diff_precision
+            self.mode = 'fwd_diff'
+        self.grad_precision = grad_precision
 
         torch.set_default_tensor_type(torch.DoubleTensor)
         self._load_model(model_path)
-
+        
 
     def calculate(self, atoms=None, properties=['energy','forces','hessian'],system_changes=None):
         super().calculate(atoms,properties,system_changes)
@@ -60,13 +60,19 @@ class MLAseCalculator(Calculator):
                                      n_rotations=0,
                                      device=self.device[0])
         if self.mode=='autograd':
-            energy = self.model(data).detach().cpu().numpy()
-            forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
-            hessian = F.hessian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
-            #pred = self.model(data)
-            #energy = pred['E'].detach().cpu().numpy()
-            #forces = pred['F'].detach().cpu().numpy()
-            #hessian = pred['H'].detach().cpu().numpy()
+            #pred_E = lambda R: self.model(dict(data, R=R))
+            #pred_F = torch.func.jacrev(pred_E)
+            #pred_H = torch.func.hessian(pred_E)
+            #energy = pred_E(data['R'])
+            #forces = -pred_F(data['R'])
+            #hessian = pred_H(data['R'])
+            #energy = self.model(data).detach().cpu().numpy()
+            #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
+            #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
+            pred = self.model(data)
+            energy = pred['E'].detach().cpu().numpy()
+            forces = pred['F'].detach().cpu().numpy()
+            hessian = pred['H'].detach().cpu().numpy()
         elif self.mode=='fwd_diff':
             pred = self.model(data)
             energy = pred['E'].detach().cpu().numpy()
@@ -75,7 +81,7 @@ class MLAseCalculator(Calculator):
             n = 1
             for A_ in range(forces.shape[1]):
                 for X_ in range(3):
-                    hessian[0, A_, X_, :, :] = -(forces[n] - forces[0]) / self.diff_precision
+                    hessian[0, A_, X_, :, :] = -(forces[n] - forces[0]) / self.grad_precision
                     n += 1
             forces = forces[0]
         energy = energy * kcal / mol
@@ -87,6 +93,7 @@ class MLAseCalculator(Calculator):
             self.results['forces'] = forces.squeeze()
         if 'hessian' in properties:
             self.results['hessian'] = hessian.squeeze()
+        del pred, energy, forces, hessian
 
 
     def _load_model(self,model_path):
@@ -104,7 +111,7 @@ class MLAseCalculator(Calculator):
                             normalize_atomic=settings['model']['normalize_atomic'],
                             requires_dr=settings['model']['requires_dr'],
                             device=self.device[0],
-                            create_graph=True,
+                            create_graph=False,
                             shared_interactions=settings['model']['shared_interactions'],
                             return_hessian=return_hessian,
                             double_update_latent=settings['model']['double_update_latent'],
@@ -163,7 +170,7 @@ class MLAseCalculator(Calculator):
             n = 1
             for A_ in range(data['R'].shape[1]):
                 for X_ in range(3):
-                    data['R'][n, A_, X_] += self.diff_precision
+                    data['R'][n, A_, X_] += self.grad_precision
                     n += 1
         return data
 
