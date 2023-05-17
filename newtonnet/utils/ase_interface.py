@@ -51,7 +51,7 @@ class MLAseCalculator(Calculator):
         if self.method == 'autograd':
             self.return_hessian = True
         elif self.method == 'fwd_diff':
-            self.return_hessian = True
+            self.return_hessian = False
             self.grad_precision = grad_precision
         else:
             self.return_hessian = False
