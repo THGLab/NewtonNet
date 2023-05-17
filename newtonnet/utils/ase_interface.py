@@ -18,7 +18,7 @@ class MLAseCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, method='fwd_diff', grad_precision=0.0001, device='cpu', **kwargs):
+    def __init__(self, model_path, settings_path, method='autograd', grad_precision=None, device='cpu', **kwargs):
         """
         Constructor for MLAseCalculator
 
@@ -34,7 +34,7 @@ class MLAseCalculator(Calculator):
             'fwd_diff': forward difference (default, requires grad_precision)
             None: do not calculated hessian
         grad_precision: float
-            hessian gradient calculation precision. default: 0.0001
+            hessian gradient calculation precision.
         device: 
             device to run model. eg. 'cpu', ['cuda:0', 'cuda:1']
         kwargs
