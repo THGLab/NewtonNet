@@ -18,7 +18,7 @@ class MLAseCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, grad_precision=0.0, device='cpu', **kwargs):
+    def __init__(self, model_path, settings_path, method='fwd_diff', grad_precision=0.0001, device='cpu', **kwargs):
         """
         Constructor for MLAseCalculator
 
@@ -28,10 +28,15 @@ class MLAseCalculator(Calculator):
             path to the model. eg. '5k/models/best_model_state.tar'
         settings_path: str
             path to the .yml setting path. eg. '5k/run_scripts/config_h2.yml'
+        method: str
+            method to calculate hessians. 
+            'autograd': automatic differentiation
+            'fwd_diff': forward difference (default, requires grad_precision)
+            None: do not calculated hessian
         grad_precision: float
-            hessian gradient calculation precision. default: 0.0, i.e. automatic differentiation 
+            hessian gradient calculation precision. default: 0.0001
         device: 
-            device to run model eg. 'cpu', ['cuda:0', 'cuda:1']
+            device to run model. eg. 'cpu', ['cuda:0', 'cuda:1']
         kwargs
         """
         Calculator.__init__(self, **kwargs)
@@ -42,11 +47,14 @@ class MLAseCalculator(Calculator):
         else:
             self.device = [torch.device(device)]
 
-        if grad_precision == 0:
-            self.mode = 'autograd'
+        self.method = method
+        if self.method == 'autograd':
+            self.return_hessian = True
+        elif self.method == 'fwd_diff':
+            self.return_hessian = True
+            self.grad_precision = grad_precision
         else:
-            self.mode = 'fwd_diff'
-        self.grad_precision = grad_precision
+            self.return_hessian = False
 
         torch.set_default_tensor_type(torch.DoubleTensor)
         self._load_model(model_path)
@@ -59,7 +67,7 @@ class MLAseCalculator(Calculator):
                                      batch_size=1, 
                                      n_rotations=0,
                                      device=self.device[0])
-        if self.mode=='autograd':
+        if self.method=='autograd':
             #pred_E = lambda R: self.model(dict(data, R=R))
             #pred_F = torch.func.jacrev(pred_E)
             #pred_H = torch.func.hessian(pred_E)
@@ -73,7 +81,7 @@ class MLAseCalculator(Calculator):
             energy = pred['E'].detach().cpu().numpy()
             forces = pred['F'].detach().cpu().numpy()
             hessian = pred['H'].detach().cpu().numpy()
-        elif self.mode=='fwd_diff':
+        elif self.method=='fwd_diff':
             pred = self.model(data)
             energy = pred['E'].detach().cpu().numpy()
             forces = pred['F'].detach().cpu().numpy()
@@ -98,7 +106,6 @@ class MLAseCalculator(Calculator):
 
     def _load_model(self,model_path):
         settings = self.settings
-        return_hessian = True if self.mode=='autograd' else False
         activation = get_activation_by_string(settings['model']['activation'])
         model = NewtonNet(resolution=settings['model']['resolution'],
                             n_features=settings['model']['n_features'],
@@ -113,7 +120,7 @@ class MLAseCalculator(Calculator):
                             device=self.device[0],
                             create_graph=False,
                             shared_interactions=settings['model']['shared_interactions'],
-                            return_hessian=return_hessian,
+                            return_hessian=self.return_hessian,
                             double_update_latent=settings['model']['double_update_latent'],
                             layer_norm=settings['model']['layer_norm'],
                             )
@@ -161,7 +168,7 @@ class MLAseCalculator(Calculator):
             'E': np.zeros((1,1)), #shape(ndata,1)
             'F': np.zeros((1,len(atoms.get_atomic_numbers()), 3)),#shape(ndata,natoms,3)
         }
-        if self.mode=='fwd_diff':
+        if self.method=='fwd_diff':
             n = data['R'].size
             data['R'] = np.tile(data['R'], (1 + n, 1, 1))
             data['Z'] = np.tile(data['Z'], (1 + n, 1))
