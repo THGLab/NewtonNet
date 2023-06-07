@@ -24,9 +24,9 @@ class MLAseCalculator(Calculator):
 
         Parameters
         ----------
-        model_path: str
+        model_path: str or list of str
             path to the model. eg. '5k/models/best_model_state.tar'
-        settings_path: str
+        settings_path: str or list of str
             path to the .yml setting path. eg. '5k/run_scripts/config_h2.yml'
         method: str
             method to calculate hessians. 
@@ -40,7 +40,6 @@ class MLAseCalculator(Calculator):
         kwargs
         """
         Calculator.__init__(self, **kwargs)
-        self.settings = yaml.safe_load(open(settings_path, "r"))
 
         if type(device) is list:
             self.device = [torch.device(item) for item in device]
@@ -57,55 +56,61 @@ class MLAseCalculator(Calculator):
             self.return_hessian = False
 
         torch.set_default_tensor_type(torch.DoubleTensor)
-        self._load_model(model_path)
+        if type(model_path) is list:
+            self.models = [self.load_model(model_path_, settings_path_) for model_path_, settings_path_ in zip(model_path, settings_path)]
+        else:
+            self.models = [self.load_model(model_path, settings_path)]
         
 
     def calculate(self, atoms=None, properties=['energy','forces','hessian'],system_changes=None):
         super().calculate(atoms,properties,system_changes)
         data = extensive_data_loader(data=self.data_formatter(atoms),
-                                     env_provider=ExtensiveEnvironment(),
-                                     batch_size=1, 
-                                     n_rotations=0,
                                      device=self.device[0])
+        energy = np.zeros((len(self.models), 1))
+        forces = np.zeros((len(self.models), data['R'].shape[1], 3))
+        hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
         if self.method=='autograd':
-            #pred_E = lambda R: self.model(dict(data, R=R))
-            #pred_F = torch.func.jacrev(pred_E)
-            #pred_H = torch.func.hessian(pred_E)
-            #energy = pred_E(data['R'])
-            #forces = -pred_F(data['R'])
-            #hessian = pred_H(data['R'])
-            #energy = self.model(data).detach().cpu().numpy()
-            #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
-            #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
-            pred = self.model(data)
-            energy = pred['E'].detach().cpu().numpy()
-            forces = pred['F'].detach().cpu().numpy()
-            hessian = pred['H'].detach().cpu().numpy()
+            for model_, model in enumerate(self.models):
+                #pred_E = lambda R: self.model(dict(data, R=R))
+                #pred_F = torch.func.jacrev(pred_E)
+                #pred_H = torch.func.hessian(pred_E)
+                #energy = pred_E(data['R'])
+                #forces = -pred_F(data['R'])
+                #hessian = pred_H(data['R'])
+                #energy = self.model(data).detach().cpu().numpy()
+                #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
+                #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
+                pred = model(data)
+                energy[model_] = pred['E'].detach().cpu().numpy()
+                forces[model_] = pred['F'].detach().cpu().numpy()
+                hessian[model_] = pred['H'].detach().cpu().numpy()
+                del pred
         elif self.method=='fwd_diff':
-            pred = self.model(data)
-            energy = pred['E'].detach().cpu().numpy()
-            forces = pred['F'].detach().cpu().numpy()
-            hessian = np.zeros((1, forces.shape[1], 3, forces.shape[1], 3))
-            n = 1
-            for A_ in range(forces.shape[1]):
-                for X_ in range(3):
-                    hessian[0, A_, X_, :, :] = -(forces[n] - forces[0]) / self.grad_precision
-                    n += 1
-            forces = forces[0]
+            for model_, model in enumerate(self.models):
+                pred = self.model(data)
+                energy[model_] = pred['E'].detach().cpu().numpy()
+                forces_temp = pred['F'].detach().cpu().numpy()
+                forces[model_] = forces_temp[0]
+                n = 1
+                for A_ in range(data['R'].shape[1]):
+                    for X_ in range(3):
+                        hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[0]) / self.grad_precision
+                        n += 1
+                del pred
         energy = energy * kcal / mol
         forces = forces * kcal / mol / Ang
         hessian =  hessian * kcal / mol / Ang / Ang
-        if 'energy' in properties:
-            self.results['energy'] = energy.squeeze()
-        if 'forces' in properties:
-            self.results['forces'] = forces.squeeze()
-        if 'hessian' in properties:
-            self.results['hessian'] = hessian.squeeze()
-        del pred, energy, forces, hessian
+        self.results['energy'] = energy.mean(axis=0)
+        self.results['forces'] = forces.mean(axis=0)
+        self.results['hessian'] = hessian.mean(axis=0)
+        self.results['energy_std'] = energy.std(axis=0)
+        self.results['forces_std'] = forces.std(axis=0)
+        self.results['hessian_std'] = hessian.std(axis=0)
+        del energy, forces, hessian
 
 
-    def _load_model(self,model_path):
-        settings = self.settings
+    def load_model(self, model_path, settings_path):
+        settings = yaml.safe_load(open(settings_path, "r"))
         activation = get_activation_by_string(settings['model']['activation'])
         model = NewtonNet(resolution=settings['model']['resolution'],
                             n_features=settings['model']['n_features'],
@@ -126,26 +131,13 @@ class MLAseCalculator(Calculator):
                             )
 
         model.load_state_dict(torch.load(model_path, map_location=self.device[0])['model_state_dict'], )
-        self.model = model
-        self.model.to(self.device[0])
-        self.model.eval()
-        self.model.requires_dr = True
+        model = model
+        model.to(self.device[0])
+        model.eval()
+        return model
+    
 
-
-    def predict(self,data_dict):
-        env = ExtensiveEnvironment()
-        val_batch = extensive_data_loader(data=data_dict,
-                                         env_provider=env,
-                                         batch_size=1, 
-                                         n_rotations=0,
-                                         device=self.device[0],)
-        #val_batch = next(data_gen)
-        data_preds = self.model(val_batch)
-
-        return data_preds
-
-
-    def data_formatter(self,atoms):
+    def data_formatter(self, atoms):
         """
         convert ase.Atoms to input format of the model
 
@@ -182,12 +174,7 @@ class MLAseCalculator(Calculator):
         return data
 
 
-def extensive_data_loader(data,
-                          env_provider=None,
-                          batch_size=32,
-                          n_rotations=0,
-                          device=None,
-                         ):
+def extensive_data_loader(data, device=None):
     r"""
     The main function to load and iterate data based on the extensive environment provider.
 
