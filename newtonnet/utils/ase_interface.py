@@ -88,8 +88,8 @@ class MLAseCalculator(Calculator):
                 del pred
         elif self.method=='fwd_diff':
             for model_, model in enumerate(self.models):
-                pred = self.model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy()
+                pred = model(data)
+                energy[model_] = pred['E'].detach().cpu().numpy()[0]
                 forces_temp = pred['F'].detach().cpu().numpy()
                 forces[model_] = forces_temp[0]
                 n = 1
@@ -100,8 +100,8 @@ class MLAseCalculator(Calculator):
                 del pred
         elif self.method=='cnt_diff':
             for model_, model in enumerate(self.models):
-                pred = self.model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy()
+                pred = model(data)
+                energy[model_] = pred['E'].detach().cpu().numpy()[0]
                 forces_temp = pred['F'].detach().cpu().numpy()
                 forces[model_] = forces_temp[0]
                 n = 1
