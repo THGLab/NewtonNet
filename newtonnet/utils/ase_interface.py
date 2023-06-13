@@ -30,9 +30,10 @@ class MLAseCalculator(Calculator):
             path to the .yml setting path. eg. '5k/run_scripts/config_h2.yml'
         method: str
             method to calculate hessians. 
-            'autograd': automatic differentiation
-            'fwd_diff': forward difference (default, requires grad_precision)
-            None: do not calculated hessian
+            'autograd': automatic differentiation (default)
+            'fwd_diff': forward difference
+            'cnt_diff': central difference
+            None: do not calculate hessian
         grad_precision: float
             hessian gradient calculation precision.
         device: 
@@ -49,7 +50,7 @@ class MLAseCalculator(Calculator):
         self.method = method
         if self.method == 'autograd':
             self.return_hessian = True
-        elif self.method == 'fwd_diff':
+        elif self.method == 'fwd_diff' or self.method == 'cnt_diff':
             self.return_hessian = False
             self.grad_precision = grad_precision
         else:
@@ -96,6 +97,18 @@ class MLAseCalculator(Calculator):
                     for X_ in range(3):
                         hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[0]) / self.grad_precision
                         n += 1
+                del pred
+        elif self.method=='cnt_diff':
+            for model_, model in enumerate(self.models):
+                pred = self.model(data)
+                energy[model_] = pred['E'].detach().cpu().numpy()
+                forces_temp = pred['F'].detach().cpu().numpy()
+                forces[model_] = forces_temp[0]
+                n = 1
+                for A_ in range(data['R'].shape[1]):
+                    for X_ in range(3):
+                        hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[n+1]) / 2 / self.grad_precision
+                        n += 2
                 del pred
         energy = energy * kcal / mol
         forces = forces * kcal / mol / Ang
@@ -171,6 +184,18 @@ class MLAseCalculator(Calculator):
                 for X_ in range(3):
                     data['R'][n, A_, X_] += self.grad_precision
                     n += 1
+        if self.method=='cnt_diff':
+            n = data['R'].size
+            data['R'] = np.tile(data['R'], (1 + 2*n, 1, 1))
+            data['Z'] = np.tile(data['Z'], (1 + 2*n, 1))
+            data['E'] = np.tile(data['E'], (1 + 2*n, 1))
+            data['F'] = np.tile(data['F'], (1 + 2*n, 1, 1))
+            n = 1
+            for A_ in range(data['R'].shape[1]):
+                for X_ in range(3):
+                    data['R'][n, A_, X_] += self.grad_precision
+                    data['R'][n+1, A_, X_] -= self.grad_precision
+                    n += 2
         return data
 
 
