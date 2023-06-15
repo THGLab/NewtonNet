@@ -190,7 +190,7 @@ trainer = Trainer(model=model,
                   hooks=settings['hooks'],
                   mode=train_mode)
 
-trainer.print_layers()
+# trainer.print_layers()
 
 # tr_steps=1; val_steps=0; irc_steps=0; test_steps=0
 

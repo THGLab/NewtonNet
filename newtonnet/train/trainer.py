@@ -532,7 +532,7 @@ class Trainer:
 
         running_val_loss = []
         last_test_epoch = 0
-        for _ in range(epochs):
+        for _ in tqdm(range(epochs)):
             t0 = time.time()
 
             # record total number of epochs so far
@@ -551,11 +551,11 @@ class Trainer:
             self.model.train()
             self.model.requires_dr = self.requires_dr
             self.optimizer.zero_grad()
-            step_iterator = range(steps)
-            if not self.verbose:
-                step_iterator = tqdm(step_iterator)
+            # step_iterator = range(steps)
+            # if not self.verbose:
+            #     step_iterator = tqdm(step_iterator)
 
-            for s in step_iterator:
+            for s in range(steps):
                 self.optimizer.zero_grad()
 
                 train_batch = next(train_generator)
@@ -633,7 +633,7 @@ class Trainer:
                 rmse_ai = np.mean(rmse_ai[-100:])
 
             # plots
-            self.plot_grad_flow()
+            # self.plot_grad_flow()
 
             # validation
             val_error = float("inf")
