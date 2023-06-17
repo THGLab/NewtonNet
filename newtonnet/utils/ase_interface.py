@@ -65,8 +65,7 @@ class MLAseCalculator(Calculator):
 
     def calculate(self, atoms=None, properties=['energy','forces','hessian'],system_changes=None):
         super().calculate(atoms,properties,system_changes)
-        data = extensive_data_loader(data=self.data_formatter(atoms),
-                                     device=self.device[0])
+        data = self.extensive_data_loader(data=self.data_formatter(atoms), device=self.device[0])
         energy = np.zeros((len(self.models), 1))
         forces = np.zeros((len(self.models), data['R'].shape[1], 3))
         hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
@@ -110,6 +109,11 @@ class MLAseCalculator(Calculator):
                         hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[n+1]) / 2 / self.grad_precision
                         n += 2
                 del pred
+        idx = self.q_test(energy)
+        if idx is not None:
+            energy = np.delete(energy, idx, axis=0)
+            forces = np.delete(forces, idx, axis=0)
+            hessian = np.delete(hessian, idx, axis=0)
         energy = energy * kcal / mol
         forces = forces * kcal / mol / Ang
         hessian =  hessian * kcal / mol / Ang / Ang
@@ -199,106 +203,90 @@ class MLAseCalculator(Calculator):
         return data
 
 
-def extensive_data_loader(data, device=None):
-    r"""
-    The main function to load and iterate data based on the extensive environment provider.
+    def extensive_data_loader(self, data, device=None):
+        batch = {'R': torch.tensor(data['R']),
+                'Z': torch.tensor(data['Z'])}
+        N, NM, AM, _, _ = ExtensiveEnvironment().get_environment(batch['R'].clone(), batch['Z'].clone())
+        batch.update({'N': N, 'NM': NM, 'AM': AM})
+        batch = batch_dataset_converter(batch, device=device)
+        return batch
+    
 
-    Parameters
-    ----------
-    data: dict
-        dictionary of arrays with following keys:
-            - 'R':positions
-            - 'Z':atomic_numbers
-            - 'E':energy
-            - 'F':forces
-            optional:
-            - 'lattice': lattice vector for pbc shape(9,)
+    def q_test(self, data):
+        """
+        Dixon's Q test for outlier detection
 
-    env_provider: ShellProvider
-        the instance of combust.data.ExtensiveEnvironment
+        Parameters
+        ----------
+        data: 1d array with shape (nlearners,)
 
-    batch_size: int, optional (default: 32)
-        The size of output tensors
-
-    n_rotations: int, optional (default: 0)
-        Number of times to rotate voxel boxes for data augmentation.
-        If zero, the original orientation will be used.
-
-    freeze_rotations: bool, optional (default: False)
-        If True rotation angles will be determined and fixed during generation.
-
-    keep_original: bool, optional (default: True)
-        If True, the original orientation of data is kept in each epoch
-
-    device: torch.device
-        either cpu or gpu (cuda) device.
-
-    shuffle: bool, optional (default: True)
-        If ``True``, shuffle the list of file path and batch indices between iterations.
-
-    drop_last: bool, optional (default: False)
-        set to ``True`` to drop the last incomplete batch,
-        if the dataset size is not divisible by the batch size. If ``False`` and
-        the size of dataset is not divisible by the batch size, then the last batch
-        will be smaller. (default: ``False``)
-
-    Yields
-    -------
-    BatchDataset: instance of BatchDataset with the all batch data
-
-    """
-    batch = {'R': torch.tensor(data['R']),
-             'Z': torch.tensor(data['Z'])}
-    N, NM, AM, _, _ = ExtensiveEnvironment().get_environment(batch['R'].clone(), batch['Z'].clone())
-    batch.update({'N': N, 'NM': NM, 'AM': AM})
-    batch = batch_dataset_converter(batch, device=device)
-    return batch
-
-
-##-------------------------------------
-##     ASE interface for Plumed calculator
-##--------------------------------------
-class PlumedCalculator(Calculator):
-    implemented_properties = ['energy', 'forces']  # , 'stress'
-    def __init__(self, ase_plumed, **kwargs):
-        Calculator.__init__(self, **kwargs)
-        self.ase_plumed = ase_plumed
-        self.counter = 0
-        self.prev_force =None
-        self.prev_energy = None
-
-    def calculate(self, atoms=None, properties=['forces'],system_changes=None):
-        super().calculate(atoms,properties,system_changes)
-        forces = np.zeros((atoms.get_positions()).shape)
-        energy = 0
-
-        model_force = np.copy(forces)
-        self.counter += 1
-        # every step() call will call get_forces 2 times, only do plumed once(2nd) to make metadynamics work correctly
-        # there is one call to get_forces when initialize
-        # print(self.counter)
-        # plumed_forces, plumed_energy = self.ase_plumed.external_forces(self.counter , new_forces=forces,
-        #
-        #                                                                delta_forces=True)
-        if self.counter % 2 == 1:
-            plumed_forces,plumed_energy = self.ase_plumed.external_forces((self.counter + 1) // 2 - 1, new_forces=forces,
-                                                            new_energy=energy,delta_forces=True)
-            self.prev_force = plumed_forces
-            self.prev_energy = plumed_energy
-            # print('force diff', np.sum(plumed_forces - model_force))
+        Returns
+        -------
+        idx: int or None
+            the index to be filtered out (return only one index for now as the default is only 4 learners)
+        """
+        q_ref = { 3: 0.970,  4: 0.829,  5: 0.710, 
+                  6: 0.625,  7: 0.568,  8: 0.526,  9: 0.493, 10: 0.466, 
+                 11: 0.444, 12: 0.426, 13: 0.410, 14: 0.396, 15: 0.384, 
+                 16: 0.374, 17: 0.365, 18: 0.356, 19: 0.349, 20: 0.342, 
+                 21: 0.337, 22: 0.331, 23: 0.326, 24: 0.321, 25: 0.317, 
+                 26: 0.312, 27: 0.308, 28: 0.305, 29: 0.301, 30: 0.290}.get(len(self.models))  # 95% confidence interval
+        sorted_data = np.sort(data, axis=0)
+        q_stat_min = (sorted_data[1] - sorted_data[0]) / (sorted_data[-1] - sorted_data[0])
+        q_stat_max = (sorted_data[-1] - sorted_data[-2]) / (sorted_data[-1] - sorted_data[0])
+        if q_stat_min > q_ref:
+            idx = np.argmin(data)
+        elif q_stat_max > q_ref:
+            idx = np.argmax(data)
         else:
-            plumed_forces = self.prev_force
-            plumed_energy = self.prev_energy
-            # print(self.counter)
-        # if self.counter % 500 == 0:
-        #     print('force diff', np.linalg.norm(plumed_forces - model_force))
+            idx = None
+        return idx
 
 
-        # delta energy and forces
-        if 'energy' in properties:
-            self.results['energy'] = plumed_energy
-        if 'forces' in properties:
-            self.results['forces'] = plumed_forces
+# ##-------------------------------------
+# ##     ASE interface for Plumed calculator
+# ##--------------------------------------
+# class PlumedCalculator(Calculator):
+#     implemented_properties = ['energy', 'forces']  # , 'stress'
+#     def __init__(self, ase_plumed, **kwargs):
+#         Calculator.__init__(self, **kwargs)
+#         self.ase_plumed = ase_plumed
+#         self.counter = 0
+#         self.prev_force =None
+#         self.prev_energy = None
 
-if __name__ == '__main__':
-    pass
+#     def calculate(self, atoms=None, properties=['forces'],system_changes=None):
+#         super().calculate(atoms,properties,system_changes)
+#         forces = np.zeros((atoms.get_positions()).shape)
+#         energy = 0
+
+#         model_force = np.copy(forces)
+#         self.counter += 1
+#         # every step() call will call get_forces 2 times, only do plumed once(2nd) to make metadynamics work correctly
+#         # there is one call to get_forces when initialize
+#         # print(self.counter)
+#         # plumed_forces, plumed_energy = self.ase_plumed.external_forces(self.counter , new_forces=forces,
+#         #
+#         #                                                                delta_forces=True)
+#         if self.counter % 2 == 1:
+#             plumed_forces,plumed_energy = self.ase_plumed.external_forces((self.counter + 1) // 2 - 1, new_forces=forces,
+#                                                             new_energy=energy,delta_forces=True)
+#             self.prev_force = plumed_forces
+#             self.prev_energy = plumed_energy
+#             # print('force diff', np.sum(plumed_forces - model_force))
+#         else:
+#             plumed_forces = self.prev_force
+#             plumed_energy = self.prev_energy
+#             # print(self.counter)
+#         # if self.counter % 500 == 0:
+#         #     print('force diff', np.linalg.norm(plumed_forces - model_force))
+
+
+#         # delta energy and forces
+#         if 'energy' in properties:
+#             self.results['energy'] = plumed_energy
+#         if 'forces' in properties:
+#             self.results['forces'] = plumed_forces
+
+# if __name__ == '__main__':
+#     pass
