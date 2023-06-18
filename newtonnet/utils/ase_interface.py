@@ -114,15 +114,16 @@ class MLAseCalculator(Calculator):
             energy = np.delete(energy, idx, axis=0)
             forces = np.delete(forces, idx, axis=0)
             hessian = np.delete(hessian, idx, axis=0)
-        energy = energy * kcal / mol
-        forces = forces * kcal / mol / Ang
-        hessian =  hessian * kcal / mol / Ang / Ang
+        energy = energy * (kcal/mol)
+        forces = forces * (kcal/mol/Ang)
+        hessian =  hessian * (kcal/mol/Ang/Ang)
         self.results['energy'] = energy.mean(axis=0)
         self.results['forces'] = forces.mean(axis=0)
         self.results['hessian'] = hessian.mean(axis=0)
         self.results['energy_std'] = energy.std(axis=0)
         self.results['forces_std'] = forces.std(axis=0)
         self.results['hessian_std'] = hessian.std(axis=0)
+        self.results['outlier'] = idx
         del energy, forces, hessian
 
 
