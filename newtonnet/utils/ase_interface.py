@@ -117,10 +117,10 @@ class MLAseCalculator(Calculator):
         energy = energy * (kcal/mol)
         forces = forces * (kcal/mol/Ang)
         hessian =  hessian * (kcal/mol/Ang/Ang)
-        self.results['energy'] = energy.mean(axis=0)
+        self.results['energy'] = energy.mean()
         self.results['forces'] = forces.mean(axis=0)
         self.results['hessian'] = hessian.mean(axis=0)
-        self.results['energy_std'] = energy.std(axis=0)
+        self.results['energy_std'] = energy.std()
         self.results['forces_std'] = forces.std(axis=0)
         self.results['hessian_std'] = hessian.std(axis=0)
         self.results['outlier'] = idx
