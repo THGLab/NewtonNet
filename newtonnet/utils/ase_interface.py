@@ -109,6 +109,12 @@ class MLAseCalculator(Calculator):
                         hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[n+1]) / 2 / self.grad_precision
                         n += 2
                 del pred
+        elif self.method is None:
+            for model_, model in enumerate(self.models):
+                pred = model(data)
+                energy[model_] = pred['E'].detach().cpu().numpy()[0]
+                forces[model_] = pred['F'].detach().cpu().numpy()[0]
+                del pred
         idx = self.q_test(energy)
         if idx is not None:
             energy = np.delete(energy, idx, axis=0)
@@ -205,9 +211,8 @@ class MLAseCalculator(Calculator):
 
 
     def extensive_data_loader(self, data, device=None):
-        batch = {'R': torch.tensor(data['R']),
-                'Z': torch.tensor(data['Z'])}
-        N, NM, AM, _, _ = ExtensiveEnvironment().get_environment(batch['R'].clone(), batch['Z'].clone())
+        batch = {'R': data['R'], 'Z': data['Z']}
+        N, NM, AM, _, _ = ExtensiveEnvironment().get_environment(data['R'], data['Z'])
         batch.update({'N': N, 'NM': NM, 'AM': AM})
         batch = batch_dataset_converter(batch, device=device)
         return batch
