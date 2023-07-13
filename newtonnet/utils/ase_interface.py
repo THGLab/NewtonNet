@@ -18,7 +18,7 @@ class MLAseCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, method='autograd', grad_precision=None, device='cpu', **kwargs):
+    def __init__(self, model_path, settings_path, method='autograd', grad_precision=None, disagreement='std', device='cpu', **kwargs):
         """
         Constructor for MLAseCalculator
 
@@ -35,7 +35,14 @@ class MLAseCalculator(Calculator):
             'cnt_diff': central difference
             None: do not calculate hessian
         grad_precision: float
-            hessian gradient calculation precision.
+            hessian gradient calculation precision for 'fwd_diff' and 'cnt_diff', ignored otherwise (default: None)
+        disagreement: str
+            method to calculate disagreement between models.
+            'std': standard deviation of all votes (default)
+            'std_outlierremoval': standard deviation with outlier removal
+            'range': range of all votes
+            'values': values of each vote
+            None: do not calculate disagreement
         device: 
             device to run model. eg. 'cpu', ['cuda:0', 'cuda:1']
         kwargs
@@ -56,6 +63,8 @@ class MLAseCalculator(Calculator):
         else:
             self.return_hessian = False
 
+        self.disagreement = disagreement
+
         torch.set_default_tensor_type(torch.DoubleTensor)
         if type(model_path) is list:
             self.models = [self.load_model(model_path_, settings_path_) for model_path_, settings_path_ in zip(model_path, settings_path)]
@@ -63,7 +72,7 @@ class MLAseCalculator(Calculator):
             self.models = [self.load_model(model_path, settings_path)]
         
 
-    def calculate(self, atoms=None, properties=['energy','forces','hessian'],system_changes=None):
+    def calculate(self, atoms=None, properties=['energy','forces','hessian'], system_changes=None):
         super().calculate(atoms,properties,system_changes)
         data = self.extensive_data_loader(data=self.data_formatter(atoms), device=self.device[0])
         energy = np.zeros((len(self.models), 1))
@@ -81,15 +90,15 @@ class MLAseCalculator(Calculator):
                 #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
                 #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
                 pred = model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy()
-                forces[model_] = pred['F'].detach().cpu().numpy()
-                hessian[model_] = pred['H'].detach().cpu().numpy()
+                energy[model_] = pred['E'].detach().cpu().numpy() * (kcal/mol)
+                forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
+                hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
                 del pred
         elif self.method=='fwd_diff':
             for model_, model in enumerate(self.models):
                 pred = model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy()[0]
-                forces_temp = pred['F'].detach().cpu().numpy()
+                energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
+                forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                 forces[model_] = forces_temp[0]
                 n = 1
                 for A_ in range(data['R'].shape[1]):
@@ -100,8 +109,8 @@ class MLAseCalculator(Calculator):
         elif self.method=='cnt_diff':
             for model_, model in enumerate(self.models):
                 pred = model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy()[0]
-                forces_temp = pred['F'].detach().cpu().numpy()
+                energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
+                forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                 forces[model_] = forces_temp[0]
                 n = 1
                 for A_ in range(data['R'].shape[1]):
@@ -112,24 +121,29 @@ class MLAseCalculator(Calculator):
         elif self.method is None:
             for model_, model in enumerate(self.models):
                 pred = model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy()[0]
-                forces[model_] = pred['F'].detach().cpu().numpy()[0]
+                energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
+                forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
                 del pred
-        idx = self.q_test(energy)
-        if idx is not None:
-            energy = np.delete(energy, idx, axis=0)
-            forces = np.delete(forces, idx, axis=0)
-            hessian = np.delete(hessian, idx, axis=0)
-        energy = energy * (kcal/mol)
-        forces = forces * (kcal/mol/Ang)
-        hessian =  hessian * (kcal/mol/Ang/Ang)
-        self.results['energy'] = energy.mean()
-        self.results['forces'] = forces.mean(axis=0)
-        self.results['hessian'] = hessian.mean(axis=0)
-        self.results['energy_std'] = energy.std()
-        self.results['forces_std'] = forces.std(axis=0)
-        self.results['hessian_std'] = hessian.std(axis=0)
-        self.results['outlier'] = idx
+        self.results['outlier'] = self.q_test(energy)
+        self.results['energy'] = self.remove_outlier(energy, self.results['outlier']).mean()
+        self.results['forces'] = self.remove_outlier(forces, self.results['outlier']).mean(axis=0)
+        self.results['hessian'] = self.remove_outlier(hessian, self.results['outlier']).mean(axis=0)
+        if self.disagreement=='std':
+            self.results['energy_disagreement'] = energy.std()
+            self.results['forces_disagreement'] = forces.std(axis=0).max()
+            self.results['hessian_disagreement'] = hessian.std(axis=0).max()
+        elif self.disagreement=='std_outlierremoval':
+            self.results['energy_disagreement'] = self.remove_outlier(energy, self.results['outlier']).std()
+            self.results['forces_disagreement'] = self.remove_outlier(forces, self.results['outlier']).std(axis=0).max()
+            self.results['hessian_disagreement'] = self.remove_outlier(hessian, self.results['outlier']).std(axis=0).max()
+        elif self.disagreement=='range':
+            self.results['energy_disagreement'] = (energy.max() - energy.min())
+            self.results['forces_disagreement'] = (forces.max(axis=0) - forces.min(axis=0)).max()
+            self.results['hessian_disagreement'] = (hessian.max(axis=0) - hessian.min(axis=0)).max()
+        elif self.disagreement=='values':
+            self.results['energy_disagreement'] = energy
+            self.results['forces_disagreement'] = forces
+            self.results['hessian_disagreement'] = hessian
         del energy, forces, hessian
 
 
@@ -217,6 +231,13 @@ class MLAseCalculator(Calculator):
         batch = batch_dataset_converter(batch, device=device)
         return batch
     
+
+    def remove_outlier(self, data, idx):
+        if idx is None:
+            return data
+        else:
+            return np.delete(data, idx, axis=0)
+
 
     def q_test(self, data):
         """
