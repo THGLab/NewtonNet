@@ -13,7 +13,7 @@ Please install (or load) conda and then proceed with the following commands:
 You also need to install Pytorch based on your hardware (we support both cpu and gpu) and the command line 
 provided on the official website: https://pytorch.org/get-started/locally/. For example:
 
-    conda install pytorch==1.10.1 torchvision==0.11.2 torchaudio==0.10.1 cudatoolkit=11.3 -c pytorch -c conda-forge
+    pip3 install torch torchvision torchaudio
 
 Now, you can install NewtonNet in the conda environment by cloning this repository:
 
