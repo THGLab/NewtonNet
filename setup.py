@@ -28,6 +28,7 @@ if __name__ == "__main__":
         ],
         license='MIT',
         packages=setuptools.find_packages(),
+        install_requires=["numpy", "scipy", "scikit-learn", "pandas", "ase", "tqdm", "pyyaml", "torch"]
         include_package_data=True,
         classifiers=[
             'Development Status :: 4 - Beta',
