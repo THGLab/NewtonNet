@@ -5,7 +5,7 @@ A Newtonian message passing network for deep learning of interatomic potentials 
 We recommend using conda environment to install dependencies of this library first.
 Please install (or load) conda and then proceed with the following commands:
 
-    conda create --name newtonnet python=3.7
+    conda create --name newtonnet python=3.10
     conda activate newtonnet
     conda install -c conda-forge numpy scipy scikit-learn pandas ase tqdm
     pip install pyyaml
@@ -17,7 +17,7 @@ provided on the official website: https://pytorch.org/get-started/locally/. For 
 
 Now, you can install NewtonNet in the conda environment by cloning this repository:
 
-    git clone https://github.com/ericyuan00000/NewtonNet.git
+    git clone https://github.com/THGLab/NewtonNet.git
 
 and then runnig the following command inside the NewtonNet repository (where you have access to setup.py):
 
