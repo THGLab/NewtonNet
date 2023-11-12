@@ -7,8 +7,6 @@ from sklearn.utils import random
 from sklearn.utils.random import sample_without_replacement
 from sklearn.model_selection import train_test_split
 
-from newtonnet.utils.utility import standardize_batch
-from newtonnet.utils import DataManager, parse_irc_data
 from newtonnet.data import ExtensiveEnvironment, PeriodicEnvironment
 from newtonnet.data import extensive_train_loader, extensive_loader_rotwise
 
@@ -400,7 +398,7 @@ def parse_nmr_data(settings, device, test_only=False):
         else:
             test_path = root_folder
             train_proteins, test_proteins = train_test_split(os.listdir(root_folder),
-                        test_size=test_proportion, 
+                        test_size=test_proportion,
                         random_state=settings['data']['random_states'])
         # Load train data
         for protein in train_proteins:
@@ -480,7 +478,7 @@ def parse_nmr_data(settings, device, test_only=False):
                 scaler[dtrain['Z'][i] == z] = normalizers[z][1]
             atomic_cs_scalers.append(scaler)
         dtrain['cs_scaler'] = np.array(atomic_cs_scalers)
-        
+
     tr_batch_size = settings['training']['tr_batch_size']
     val_batch_size = settings['training']['val_batch_size']
     tr_rotations = settings['training']['tr_rotations']
@@ -572,7 +570,7 @@ def parse_ani_data(settings, device):
 
     if test_data and isinstance(test_data, int):
         test_data = [test_data]
-    
+
     test_size_per_molecule = settings['data']['test_size_per_molecule']
 
     dtrain = {'R':[], 'Z':[], 'N':[], 'E':[]}
@@ -592,8 +590,8 @@ def parse_ani_data(settings, device):
             conf_indices = np.arange(n_conf)
             # If no test data specified, for each molecule split conformations into train and test
             if test_data is False:
-                train_idx, test_idx = train_test_split(conf_indices, 
-                    test_size=math.ceil(test_size_per_molecule * n_conf), 
+                train_idx, test_idx = train_test_split(conf_indices,
+                    test_size=math.ceil(test_size_per_molecule * n_conf),
                     random_state=settings['data']['train_test_split_random_state'])
             else:
                 train_idx = conf_indices
@@ -608,7 +606,7 @@ def parse_ani_data(settings, device):
                 dtest['Z'].extend(np.tile([atomic_Z_map[a] for a in molecule['species']], (n_conf_test, 1)))
                 dtest['N'].extend([n_atoms] * n_conf_test)
                 dtest['E'].extend(molecule['energies'][test_idx])
-            
+
     if test_data:
         for test_data_num in test_data:
             ani_data = anidataloader(root + "/ani_gdb_s0%d.h5" % test_data_num)
@@ -708,6 +706,119 @@ def parse_ani_data(settings, device):
                                         drop_last=False)
 
     return train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, n_tr_data, n_val_data, n_test_data, normalizer, test_energy_hash
+
+def parse_t1x_data(settings, device):
+    """
+    implementation based on train and validation size.
+    we don't need the test_size in this implementaion.
+
+    Parameters
+    ----------
+    settings: instance of yaml file
+    device: torch.device
+        list of torch devices
+
+    Returns
+    -------
+    generator: train, val, test generators, respectively
+    int: n_steps for train, val, test, respectively
+    tuple: tuple of mean and standard deviation of energies in the training data
+
+    """
+    # meta data
+    train_path = settings['data']['train_path']
+    val_path = settings['data']['val_path']
+    test_path = settings['data']['test_path']   # can be False
+
+
+
+    # read data
+    dtrain = dict(np.load(train_path))
+    dval = dict(np.load(val_path))
+    dtest = dict(np.load(test_path))
+
+    # convert unit
+    # dtrain['E'] = dtrain['E'] * 23.061
+    # dtrain['F'] = dtrain['F'] * 23.061
+    # dval['E'] = dval['E'] * 23.061
+    # dval['F'] = dval['F'] * 23.061
+    # dtest['E'] = dtest['E'] * 23.061
+    # dtest['F'] = dtest['F'] * 23.061
+    
+    # sample data
+    if settings['data']['train_size'] != -1:
+        n_select = sample_without_replacement(dtrain['R'].shape[0], 
+                                              settings['data']['train_size'], 
+                                              random_state=settings['data']['random_states'])
+        for key in dtrain.keys():
+            dtrain[key] = dtrain[key][n_select]
+    if settings['data']['val_size'] != -1:
+        n_select = sample_without_replacement(dval['R'].shape[0], 
+                                              settings['data']['val_size'], 
+                                              random_state=settings['data']['random_states'])
+        for key in dval.keys():
+            dval[key] = dval[key][n_select]
+    if settings['data']['test_size'] != -1:
+        n_select = sample_without_replacement(dtest['R'].shape[0], 
+                                              settings['data']['test_size'], 
+                                              random_state=settings['data']['random_states'])
+        for key in dtest.keys():
+            dtest[key] = dtest[key][n_select]
+
+    # extract data stats
+    normalizer = (dtrain['E'].mean(), dtrain['E'].std())
+
+    n_tr_data = dtrain['R'].shape[0]
+    n_val_data = dval['R'].shape[0]
+    n_test_data = dtest['R'].shape[0]
+    print("data size: (train,val,test): %i, %i, %i"%(n_tr_data,n_val_data,n_test_data))
+
+    tr_batch_size = settings['training']['tr_batch_size']
+    val_batch_size = settings['training']['val_batch_size']
+    tr_rotations = settings['training']['tr_rotations']
+    val_rotations = settings['training']['val_rotations']
+
+    # generators
+    me = settings['general']['driver']
+
+    # steps
+    tr_steps = int(np.ceil(n_tr_data / tr_batch_size)) * (tr_rotations + 1)
+    val_steps = int(np.ceil(n_val_data / val_batch_size)) * (val_rotations + 1)
+    test_steps = int(np.ceil(n_test_data / val_batch_size)) * (val_rotations + 1)
+
+    env = ExtensiveEnvironment()
+
+    train_gen = extensive_train_loader(data=dtrain,
+                                       env_provider=env,
+                                       batch_size=tr_batch_size,
+                                       n_rotations=tr_rotations,
+                                       freeze_rotations=settings['training']['tr_frz_rot'],
+                                       keep_original=settings['training']['tr_keep_original'],
+                                       device=device,
+                                       shuffle=settings['training']['shuffle'],
+                                       drop_last=settings['training']['drop_last'])
+
+    val_gen = extensive_train_loader(data=dval,
+                                     env_provider=env,
+                                     batch_size=val_batch_size,
+                                     n_rotations=val_rotations,
+                                     freeze_rotations=settings['training']['val_frz_rot'],
+                                     keep_original=settings['training']['val_keep_original'],
+                                     device=device,
+                                     shuffle=settings['training']['shuffle'],
+                                     drop_last=settings['training']['drop_last'])
+
+    test_gen = extensive_train_loader(data=dtest,
+                                     env_provider=env,
+                                     batch_size=val_batch_size,
+                                     n_rotations=val_rotations,
+                                     freeze_rotations=settings['training']['val_frz_rot'],
+                                     keep_original=settings['training']['val_keep_original'],
+                                     device=device,
+                                     shuffle=False,
+                                     drop_last=False)
+
+    return train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, normalizer
 
 def parse_train_test(settings, device, unit='kcal'):
     """
