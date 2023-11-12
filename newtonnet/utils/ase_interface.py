@@ -18,7 +18,7 @@ class MLAseCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, method='autograd', grad_precision=None, disagreement='std', device='cpu', **kwargs):
+    def __init__(self, model_path, settings_path, hess_method=None, hess_precision=None, disagreement='std', device='cpu', **kwargs):
         """
         Constructor for MLAseCalculator
 
@@ -28,13 +28,13 @@ class MLAseCalculator(Calculator):
             path to the model. eg. '5k/models/best_model_state.tar'
         settings_path: str or list of str
             path to the .yml setting path. eg. '5k/run_scripts/config_h2.yml'
-        method: str
+        hess_method: str
             method to calculate hessians. 
+            None: do not calculate hessian
             'autograd': automatic differentiation (default)
             'fwd_diff': forward difference
             'cnt_diff': central difference
-            None: do not calculate hessian
-        grad_precision: float
+        hess_precision: float
             hessian gradient calculation precision for 'fwd_diff' and 'cnt_diff', ignored otherwise (default: None)
         disagreement: str
             method to calculate disagreement between models.
@@ -54,12 +54,12 @@ class MLAseCalculator(Calculator):
         else:
             self.device = [torch.device(device)]
 
-        self.method = method
-        if self.method == 'autograd':
+        self.hess_method = hess_method
+        if self.hess_method == 'autograd':
             self.return_hessian = True
-        elif self.method == 'fwd_diff' or self.method == 'cnt_diff':
+        elif self.hess_method == 'fwd_diff' or self.hess_method == 'cnt_diff':
             self.return_hessian = False
-            self.grad_precision = grad_precision
+            self.hess_precision = hess_precision
         else:
             self.return_hessian = False
 
@@ -78,7 +78,7 @@ class MLAseCalculator(Calculator):
         energy = np.zeros((len(self.models), 1))
         forces = np.zeros((len(self.models), data['R'].shape[1], 3))
         hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
-        if self.method=='autograd':
+        if self.hess_method=='autograd':
             for model_, model in enumerate(self.models):
                 #pred_E = lambda R: self.model(dict(data, R=R))
                 #pred_F = torch.func.jacrev(pred_E)
@@ -94,7 +94,7 @@ class MLAseCalculator(Calculator):
                 forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                 hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
                 del pred
-        elif self.method=='fwd_diff':
+        elif self.hess_method=='fwd_diff':
             for model_, model in enumerate(self.models):
                 pred = model(data)
                 energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
@@ -103,10 +103,10 @@ class MLAseCalculator(Calculator):
                 n = 1
                 for A_ in range(data['R'].shape[1]):
                     for X_ in range(3):
-                        hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[0]) / self.grad_precision
+                        hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[0]) / self.hess_precision
                         n += 1
                 del pred
-        elif self.method=='cnt_diff':
+        elif self.hess_method=='cnt_diff':
             for model_, model in enumerate(self.models):
                 pred = model(data)
                 energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
@@ -115,10 +115,10 @@ class MLAseCalculator(Calculator):
                 n = 1
                 for A_ in range(data['R'].shape[1]):
                     for X_ in range(3):
-                        hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[n+1]) / 2 / self.grad_precision
+                        hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[n+1]) / 2 / self.hess_precision
                         n += 2
                 del pred
-        elif self.method is None:
+        elif self.hess_method is None:
             for model_, model in enumerate(self.models):
                 pred = model(data)
                 energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
@@ -198,7 +198,7 @@ class MLAseCalculator(Calculator):
             'E': np.zeros((1,1)), #shape(ndata,1)
             'F': np.zeros((1,len(atoms.get_atomic_numbers()), 3)),#shape(ndata,natoms,3)
         }
-        if self.method=='fwd_diff':
+        if self.hess_method=='fwd_diff':
             n = data['R'].size
             data['R'] = np.tile(data['R'], (1 + n, 1, 1))
             data['Z'] = np.tile(data['Z'], (1 + n, 1))
@@ -207,9 +207,9 @@ class MLAseCalculator(Calculator):
             n = 1
             for A_ in range(data['R'].shape[1]):
                 for X_ in range(3):
-                    data['R'][n, A_, X_] += self.grad_precision
+                    data['R'][n, A_, X_] += self.hess_precision
                     n += 1
-        if self.method=='cnt_diff':
+        if self.hess_method=='cnt_diff':
             n = data['R'].size
             data['R'] = np.tile(data['R'], (1 + 2*n, 1, 1))
             data['Z'] = np.tile(data['Z'], (1 + 2*n, 1))
@@ -218,8 +218,8 @@ class MLAseCalculator(Calculator):
             n = 1
             for A_ in range(data['R'].shape[1]):
                 for X_ in range(3):
-                    data['R'][n, A_, X_] += self.grad_precision
-                    data['R'][n+1, A_, X_] -= self.grad_precision
+                    data['R'][n, A_, X_] += self.hess_precision
+                    data['R'][n+1, A_, X_] -= self.hess_precision
                     n += 2
         return data
 
