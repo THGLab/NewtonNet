@@ -30,8 +30,8 @@ class MLAseCalculator(Calculator):
             path to the .yml setting path. eg. '5k/run_scripts/config_h2.yml'
         hess_method: str
             method to calculate hessians. 
-            None: do not calculate hessian
-            'autograd': automatic differentiation (default)
+            None: do not calculate hessian (default)
+            'autograd': automatic differentiation
             'fwd_diff': forward difference
             'cnt_diff': central difference
         hess_precision: float
