@@ -12,8 +12,8 @@ if __name__ == "__main__":
     setuptools.setup(
         name=newtonnet.__name__,
         version=newtonnet.__version__,
-        author='Teresa Head-Gordon; Mojtaba Haghighatlari',
-        author_email='thg@berkeley.edu; mojtabah@berkeley.edu',
+        author='Teresa Head-Gordon',
+        author_email='thg@berkeley.edu',
         project_urls={
             'Source': 'https://github.com/THGLab/NewtonNet',
         },
