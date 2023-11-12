@@ -11,8 +11,8 @@ mlcalculator = MLAseCalculator(
                    'training_53/run_scripts/config2.yml',
                    'training_54/run_scripts/config1.yml',
                    'training_55/run_scripts/config3.yml'],    # path to configuration file, str or list of str
-    method='autograd',    # method to calculate hessians. 'autograd', 'fwd_diff', 'cnt_diff', or None (default: 'autograd')
-    # grad_precision=1e-5,    # hessian gradient calculation precision for 'fwd_diff' and 'cnt_diff', ignored otherwise (default: None)
+    hess_method='autograd',    # method to calculate hessians. 'autograd', 'fwd_diff', 'cnt_diff', or None (default: 'autograd')
+    # hess_precision=1e-5,    # hessian gradient calculation precision for 'fwd_diff' and 'cnt_diff', ignored otherwise (default: None)
     disagreement='std',    # method to calculate disagreement among models. 'std', 'std_outlierremoval', 'range':, 'values', or None (default: 'std')
     device='cpu'   # 'cpu' or list of cuda
 )
