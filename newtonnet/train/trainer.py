@@ -31,6 +31,7 @@ class Trainer:
                  energy_loss_w,
                  force_loss_w,
                  loss_wf_decay,
+                 lambda_l1,
                  checkpoint_log=1,
                  checkpoint_val=1,
                  checkpoint_test=20,
@@ -49,6 +50,7 @@ class Trainer:
         self.energy_loss_w = energy_loss_w
         self.force_loss_w = force_loss_w
         self.wf_lambda = lambda epoch: np.exp(-epoch * loss_wf_decay)
+        self.lambda_l1 = lambda_l1
 
         if type(device) is list and len(device) > 1:
             self.multi_gpu = True
@@ -131,8 +133,8 @@ class Trainer:
         os.makedirs(out_path)
         self.output_path = out_path
 
-        self.val_out_path = os.path.join(self.output_path, 'validation')
-        os.makedirs(self.val_out_path)
+        # self.val_out_path = os.path.join(self.output_path, 'validation')
+        # os.makedirs(self.val_out_path)
 
         # subdir for computation graph
         self.graph_path = os.path.join(self.output_path, 'graph')
@@ -147,7 +149,7 @@ class Trainer:
         script_out = os.path.join(self.output_path, 'run_scripts')
         os.makedirs(script_out)
         shutil.copyfile(yml_path, os.path.join(script_out,os.path.basename(yml_path)))
-        shutil.copyfile(script_name, os.path.join(script_out,script_name))
+        shutil.copyfile(script_name, os.path.join(script_out,os.path.basename(script_name)))
 
     def _hooks(self, hooks):
         hooks_list = []
@@ -530,7 +532,7 @@ class Trainer:
 
         running_val_loss = []
         last_test_epoch = 0
-        for _ in range(epochs):
+        for _ in tqdm(range(epochs)):
             t0 = time.time()
 
             # record total number of epochs so far
@@ -549,20 +551,21 @@ class Trainer:
             self.model.train()
             self.model.requires_dr = self.requires_dr
             self.optimizer.zero_grad()
-            step_iterator = range(steps)
-            if not self.verbose:
-                step_iterator = tqdm(step_iterator)
+            # step_iterator = range(steps)
+            # if not self.verbose:
+            #     step_iterator = tqdm(step_iterator)
 
-            for s in step_iterator:
+            for s in range(steps):
                 self.optimizer.zero_grad()
 
                 train_batch = next(train_generator)
                 # self.model.module(train_batch)
                 # preds = self.model.forward(train_batch)
                 preds = self.model(train_batch)
-                loss = self.loss_fn(preds, train_batch,
+                loss = self.loss_fn(preds, train_batch, self.model.parameters(),
                                     w_e=self.energy_loss_w,
-                                    w_f=w_f)
+                                    w_f=w_f,
+                                    lambda_l1=self.lambda_l1)
                 loss.backward()
                 if clip_grad>0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
@@ -630,7 +633,7 @@ class Trainer:
                 rmse_ai = np.mean(rmse_ai[-100:])
 
             # plots
-            self.plot_grad_flow()
+            # self.plot_grad_flow()
 
             # validation
             val_error = float("inf")
@@ -682,15 +685,15 @@ class Trainer:
                     outputs = self.validation('irc', irc_generator, irc_steps)
                     irc_mae_E = np.mean(outputs['E_ae'])
                     irc_mae_F = np.mean(outputs['F_ae_masked'])
-                    np.save(os.path.join(self.val_out_path, 'irc_ae_E'), outputs['E_ae'])
-                    np.save(os.path.join(self.val_out_path, 'irc_ae_F'), outputs['F_ae'])
-                    np.save(os.path.join(self.val_out_path, 'irc_pred_E'), outputs['E_pred'])
-                    np.save(os.path.join(self.val_out_path, 'irc_pred_F'), outputs['F_pred'])
-                    np.save(os.path.join(self.val_out_path, 'irc_E'), outputs['E'])
-                    np.save(os.path.join(self.val_out_path, 'irc_F'), outputs['F'])
-                    np.save(os.path.join(self.val_out_path, 'irc_Ei_best'), outputs['Ei'])
-                    np.save(os.path.join(self.val_out_path, 'irc_AM'), outputs['AM'])
-                    np.save(os.path.join(self.val_out_path, 'irc_RM'), outputs['RM'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_ae_E'), outputs['E_ae'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_ae_F'), outputs['F_ae'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_pred_E'), outputs['E_pred'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_pred_F'), outputs['F_pred'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_E'), outputs['E'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_F'), outputs['F'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_Ei_best'), outputs['Ei'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_AM'), outputs['AM'])
+                    # np.save(os.path.join(self.val_out_path, 'irc_RM'), outputs['RM'])
                     # np.save(os.path.join(self.val_out_path, 'irc_Ei_epoch%i'%self.epoch), outputs['Ei'])
 
                 # save test predictions
@@ -699,17 +702,17 @@ class Trainer:
                         outputs = self.validation('test', test_generator, test_steps)
                         test_mae_E = np.mean(outputs['E_ae'])
                         test_mae_F = np.mean(outputs['F_ae_masked'])
-                        np.save(os.path.join(self.val_out_path, 'test_ae_E'), outputs['E_ae'])
-                        np.save(os.path.join(self.val_out_path, 'test_ae_F'), outputs['F_ae'])
-                        np.save(os.path.join(self.val_out_path, 'test_pred_E'), outputs['E_pred'])
-                        np.save(os.path.join(self.val_out_path, 'test_pred_F'), outputs['F_pred'])
-                        np.save(os.path.join(self.val_out_path, 'test_E'), outputs['E'])
-                        np.save(os.path.join(self.val_out_path, 'test_F'), outputs['F'])
-                        np.save(os.path.join(self.val_out_path, 'test_AM'), outputs['AM'])
-                        np.save(os.path.join(self.val_out_path, 'test_RM'), outputs['RM'])
+                        # np.save(os.path.join(self.val_out_path, 'test_ae_E'), outputs['E_ae'])
+                        # np.save(os.path.join(self.val_out_path, 'test_ae_F'), outputs['F_ae'])
+                        # np.save(os.path.join(self.val_out_path, 'test_pred_E'), outputs['E_pred'])
+                        # np.save(os.path.join(self.val_out_path, 'test_pred_F'), outputs['F_pred'])
+                        # np.save(os.path.join(self.val_out_path, 'test_E'), outputs['E'])
+                        # np.save(os.path.join(self.val_out_path, 'test_F'), outputs['F'])
+                        # np.save(os.path.join(self.val_out_path, 'test_AM'), outputs['AM'])
+                        # np.save(os.path.join(self.val_out_path, 'test_RM'), outputs['RM'])
                     elif self.mode == "atomic_properties":
                         outputs = self.validation_atomic_properties('test', "CS", test_generator, test_steps)
-                        torch.save(outputs, os.path.join(self.val_out_path, 'test_results.pkl'))
+                        # torch.save(outputs, os.path.join(self.val_out_path, 'test_results.pkl'))
                         test_error = outputs["RMSE"]
                     last_test_epoch = self.epoch
                     # np.save(os.path.join(self.val_out_path, 'test_Ei_epoch%i'%self.epoch), outputs['Ei'])
