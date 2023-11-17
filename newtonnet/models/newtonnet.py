@@ -28,40 +28,64 @@ class NewtonNet(nn.Module):
 
     n_interactions: int, default: 3
         number of interaction blocks
-    dropout
-    max_z
-    cutoff
-    cutoff_network
-    normalizer
-    normalize_atomic
-    requires_dr
-    device
-    create_graph
-    shared_interactions
-    return_latent
+
+    dropout: float, default: 0.0
+        dropout rate
+    
+    max_z: int, default: 10
+        maximum atomic number Z in the dataset
+
+    cutoff: float, default: 5.0
+        cutoff radius in Angstrom
+
+    cutoff_network: str, default: 'poly'
+        cutoff function, can be 'poly' or 'cosine'
+
+    normalizer: tuple, default: (0.0, 1.0)
+        mean and standard deviation of the target property. If you have a dictionary of normalizers for each atomic type,
+        you can pass it as a dictionary. For example, {'1': (0.0, 1.0), '6': (0.0, 1.0), '7': (0.0, 1.0), '8': (0.0, 1.0)}
+
+    normalize_atomic: bool, default: False
+        whether to normalize the atomic energies
+
+    requires_dr: bool, default: False
+        whether to compute the forces
+
+    device: torch.device, default: None
+        device to run the network
+
+    create_graph: bool, default: False
+        whether to create the graph for the gradient computation
+
+    shared_interactions: bool, default: False
+        whether to share the interaction block weights
+
+    return_latent: bool, default: False
+        whether to return the latent forces
     """
 
-    def __init__(self,
-                 resolution,
-                 n_features,
-                 activation,
-                 n_interactions=3,
-                 dropout=0.0,
-                 max_z=10,
-                 cutoff=5.0,
-                 cutoff_network='poly',
-                 normalizer=(0.0, 1.0),
-                 normalize_atomic=False,
-                 requires_dr=False,
-                 device=None,
-                 create_graph=False,
-                 shared_interactions=False,
-                 return_hessian=False,
-                 layer_norm=False,
-                 atomic_properties_only=False,
-                 double_update_latent=True,
-                 pbc=False,
-                 aggregration='sum'):
+    def __init__(
+            self,
+            resolution,
+            n_features,
+            activation,
+            n_interactions=3,
+            dropout=0.0,
+            max_z=10,
+            cutoff=5.0,
+            cutoff_network='poly',
+            normalizer=(0.0, 1.0),
+            normalize_atomic=False,
+            requires_dr=False,
+            device=None,
+            create_graph=False,
+            shared_interactions=False,
+            return_hessian=False,
+            layer_norm=False,
+            atomic_properties_only=False,
+            double_update_latent=True,
+            pbc=False,
+            aggregration='sum'):
 
         super(NewtonNet, self).__init__()
 

@@ -78,7 +78,7 @@ class ExtensiveEnvironment(object):
         neighbors = np.repeat(neighbors[np.newaxis, ...], n_data, axis=0)  # (D, A, A-1)
 
         # mask based on zero atomic_numbers
-        mask = np.ones_like(atomic_numbers)                 #(D, A)
+        mask = np.ones_like(atomic_numbers, dtype='int')                 #(D, A)
         mask[np.where(atomic_numbers == 0)] = 0
         max_atoms = np.sum(mask, axis=1)
 
