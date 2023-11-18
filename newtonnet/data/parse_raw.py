@@ -809,38 +809,22 @@ def parse_train_test(settings, device):
 
     Parameters
     ----------
-    train_path: str
-        path to training data
+    settings: dict
+        Dictionary containing the following keys:
+            - 'train_path' (str, default=None): Path to the training data.
+            - 'val_path' (str, default=None): Path to the validation data.
+            - 'test_path' (str, default=None): Path to the test data.
+            - 'train_size' (int, default=-1): Number of training data to use (-1 for all data).
+            - 'val_size' (int, default=-1): Number of validation data to use (-1 for all data).
+            - 'test_size' (int, default=-1): Number of test data to use (-1 for all data).
+            - 'train_batch_size' (int, default=100): Batch size for training.
+            - 'val_batch_size' (int, default=100): Batch size for validation.
+            - 'test_batch_size' (int, default=100): Batch size for test.
+            - 'random_states' (int, default=0): Random state for sampling data.
 
-    val_path: str
-        path to validation data
-
-    test_path: str
-        path to test data
-
-    train_size: int
-        number of training data to use
-        default: -1 (use all data)
-
-    val_size: int
-        number of validation data to use
-        default: -1 (use all data)
-
-    test_size: int
-        number of test data to use
-        default: -1 (use all data)
-
-    random_states: int
-        random state for sampling data
-        default: 0
-
-    
-    
     device: list
-        list of torch devices
-
-    
-
+        List of torch devices.
+   
     Returns
     -------
     generator: train, val, test generators, respectively
@@ -899,9 +883,9 @@ def parse_train_test(settings, device):
     n_test_data = test_data['R'].shape[0] if test_data is not None else 0
     print(f'data size (train, val, test): {n_train_data}, {n_val_data}, {n_test_data}')
 
-    train_batch_size = settings['training']['train_batch_size']
-    val_batch_size = settings['training']['val_batch_size']
-    test_batch_size = settings['training']['test_batch_size']
+    train_batch_size = settings['training'].get('train_batch_size', 100)
+    val_batch_size = settings['training'].get('val_batch_size', 100)
+    test_batch_size = settings['training'].get('test_batch_size', 100)
 
     # generators
     me = settings['general']['driver']
