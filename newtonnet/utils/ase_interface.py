@@ -74,77 +74,78 @@ class MLAseCalculator(Calculator):
 
     def calculate(self, atoms=None, properties=['energy','forces','hessian'], system_changes=None):
         super().calculate(atoms,properties,system_changes)
-        data = self.extensive_data_loader(data=self.data_formatter(atoms), device=self.device[0])
-        energy = np.zeros((len(self.models), 1))
-        forces = np.zeros((len(self.models), data['R'].shape[1], 3))
-        hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
-        if self.hess_method=='autograd':
-            for model_, model in enumerate(self.models):
-                #pred_E = lambda R: self.model(dict(data, R=R))
-                #pred_F = torch.func.jacrev(pred_E)
-                #pred_H = torch.func.hessian(pred_E)
-                #energy = pred_E(data['R'])
-                #forces = -pred_F(data['R'])
-                #hessian = pred_H(data['R'])
-                #energy = self.model(data).detach().cpu().numpy()
-                #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
-                #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
-                pred = model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy() * (kcal/mol)
-                forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
-                hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
-                del pred
-        elif self.hess_method=='fwd_diff':
-            for model_, model in enumerate(self.models):
-                pred = model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
-                forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
-                forces[model_] = forces_temp[0]
-                n = 1
-                for A_ in range(data['R'].shape[1]):
-                    for X_ in range(3):
-                        hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[0]) / self.hess_precision
-                        n += 1
-                del pred
-        elif self.hess_method=='cnt_diff':
-            for model_, model in enumerate(self.models):
-                pred = model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
-                forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
-                forces[model_] = forces_temp[0]
-                n = 1
-                for A_ in range(data['R'].shape[1]):
-                    for X_ in range(3):
-                        hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[n+1]) / 2 / self.hess_precision
-                        n += 2
-                del pred
-        elif self.hess_method is None:
-            for model_, model in enumerate(self.models):
-                pred = model(data)
-                energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
-                forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
-                del pred
-        self.results['outlier'] = self.q_test(energy)
-        self.results['energy'] = self.remove_outlier(energy, self.results['outlier']).mean()
-        self.results['forces'] = self.remove_outlier(forces, self.results['outlier']).mean(axis=0)
-        self.results['hessian'] = self.remove_outlier(hessian, self.results['outlier']).mean(axis=0)
-        if self.disagreement=='std':
-            self.results['energy_disagreement'] = energy.std()
-            self.results['forces_disagreement'] = forces.std(axis=0).max()
-            self.results['hessian_disagreement'] = hessian.std(axis=0).max()
-        elif self.disagreement=='std_outlierremoval':
-            self.results['energy_disagreement'] = self.remove_outlier(energy, self.results['outlier']).std()
-            self.results['forces_disagreement'] = self.remove_outlier(forces, self.results['outlier']).std(axis=0).max()
-            self.results['hessian_disagreement'] = self.remove_outlier(hessian, self.results['outlier']).std(axis=0).max()
-        elif self.disagreement=='range':
-            self.results['energy_disagreement'] = (energy.max() - energy.min())
-            self.results['forces_disagreement'] = (forces.max(axis=0) - forces.min(axis=0)).max()
-            self.results['hessian_disagreement'] = (hessian.max(axis=0) - hessian.min(axis=0)).max()
-        elif self.disagreement=='values':
-            self.results['energy_disagreement'] = energy
-            self.results['forces_disagreement'] = forces
-            self.results['hessian_disagreement'] = hessian
-        del energy, forces, hessian
+        gen = self.extensive_data_loader(data=self.data_formatter(atoms), device=self.device[0])
+        for data in gen:
+            energy = np.zeros((len(self.models), 1))
+            forces = np.zeros((len(self.models), data['R'].shape[1], 3))
+            hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
+            if self.hess_method=='autograd':
+                for model_, model in enumerate(self.models):
+                    #pred_E = lambda R: self.model(dict(data, R=R))
+                    #pred_F = torch.func.jacrev(pred_E)
+                    #pred_H = torch.func.hessian(pred_E)
+                    #energy = pred_E(data['R'])
+                    #forces = -pred_F(data['R'])
+                    #hessian = pred_H(data['R'])
+                    #energy = self.model(data).detach().cpu().numpy()
+                    #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
+                    #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
+                    pred = model(data)
+                    energy[model_] = pred['E'].detach().cpu().numpy() * (kcal/mol)
+                    forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
+                    hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
+                    del pred
+            elif self.hess_method=='fwd_diff':
+                for model_, model in enumerate(self.models):
+                    pred = model(data)
+                    energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
+                    forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
+                    forces[model_] = forces_temp[0]
+                    n = 1
+                    for A_ in range(data['R'].shape[1]):
+                        for X_ in range(3):
+                            hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[0]) / self.hess_precision
+                            n += 1
+                    del pred
+            elif self.hess_method=='cnt_diff':
+                for model_, model in enumerate(self.models):
+                    pred = model(data)
+                    energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
+                    forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
+                    forces[model_] = forces_temp[0]
+                    n = 1
+                    for A_ in range(data['R'].shape[1]):
+                        for X_ in range(3):
+                            hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[n+1]) / 2 / self.hess_precision
+                            n += 2
+                    del pred
+            elif self.hess_method is None:
+                for model_, model in enumerate(self.models):
+                    pred = model(data)
+                    energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
+                    forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
+                    del pred
+            self.results['outlier'] = self.q_test(energy)
+            self.results['energy'] = self.remove_outlier(energy, self.results['outlier']).mean()
+            self.results['forces'] = self.remove_outlier(forces, self.results['outlier']).mean(axis=0)
+            self.results['hessian'] = self.remove_outlier(hessian, self.results['outlier']).mean(axis=0)
+            if self.disagreement=='std':
+                self.results['energy_disagreement'] = energy.std()
+                self.results['forces_disagreement'] = forces.std(axis=0).max()
+                self.results['hessian_disagreement'] = hessian.std(axis=0).max()
+            elif self.disagreement=='std_outlierremoval':
+                self.results['energy_disagreement'] = self.remove_outlier(energy, self.results['outlier']).std()
+                self.results['forces_disagreement'] = self.remove_outlier(forces, self.results['outlier']).std(axis=0).max()
+                self.results['hessian_disagreement'] = self.remove_outlier(hessian, self.results['outlier']).std(axis=0).max()
+            elif self.disagreement=='range':
+                self.results['energy_disagreement'] = (energy.max() - energy.min())
+                self.results['forces_disagreement'] = (forces.max(axis=0) - forces.min(axis=0)).max()
+                self.results['hessian_disagreement'] = (hessian.max(axis=0) - hessian.min(axis=0)).max()
+            elif self.disagreement=='values':
+                self.results['energy_disagreement'] = energy
+                self.results['forces_disagreement'] = forces
+                self.results['hessian_disagreement'] = hessian
+            del energy, forces, hessian
 
 
     def load_model(self, model_path, settings_path):
@@ -225,10 +226,10 @@ class MLAseCalculator(Calculator):
 
 
     def extensive_data_loader(self, data, device=None):
-        batch = {'R': data['R'], 'Z': data['Z']}
+        batch = {'R': data['R'], 'Z': data['Z'], 'E': data['E'], 'F': data['F']}
         N, NM, AM, _, _ = ExtensiveEnvironment().get_environment(data['R'], data['Z'])
         batch.update({'N': N, 'NM': NM, 'AM': AM})
-        batch = batch_dataset_converter(batch, device=device)
+        batch = batch_dataset_converter(batch, device=device, batch_size=data['R'].shape[0], shuffle=False)
         return batch
     
 
