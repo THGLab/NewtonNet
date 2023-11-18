@@ -835,7 +835,7 @@ def parse_train_test(settings, device):
     # meta data
     train_path = settings['data'].get('train_path', None)
     val_path = settings['data'].get('val_path', None)
-    test_path = settings['data'].get('test_path', None)
+    test_path = settings['data'].get('test_path', None)    # TODO: test_path can be False
     train_size = settings['data'].get('train_size', -1)
     val_size = settings['data'].get('val_size', -1)
     test_size = settings['data'].get('test_size', -1)

@@ -46,7 +46,7 @@ class ExtensiveEnvironment(object):
 
     def get_environment(self, positions, atomic_numbers):
         """
-        This function finds atomic environments extensively for each atom in the MD snapshot.
+        This function finds atomic environments extensively for each atom in the frame.
 
         Parameters
         ----------
@@ -59,8 +59,8 @@ class ExtensiveEnvironment(object):
 
         Returns
         -------
-        ndarray: 3D array of neighbors with shape (D, A, A-1)
-        ndarray: 3D array of neighbor mask with shape (D, A, A-1)
+        ndarray: 3D array of neighbors with shape (D, A, A)
+        ndarray: 3D array of neighbor mask with shape (D, A, A)
         ndarray: 2D array of atomic mask for atomic energies (D, A)
 
         """
@@ -69,35 +69,17 @@ class ExtensiveEnvironment(object):
 
         self._check_shapes(positions.shape, atomic_numbers.shape)
 
-        # 2d array of all indices for all atoms in a single data point
-        N = np.tile(np.arange(n_atoms), (n_atoms, 1))  # (A, A)
+        neighbors = np.tile(np.arange(n_atoms), (n_atoms, 1))  # (A, A)
 
         # remove the diagonal self indices
-        neighbors = N[~np.eye(n_atoms, dtype=bool)].reshape(n_atoms,
-                                                        -1)  # (A, A-1)
-        neighbors = np.repeat(neighbors[np.newaxis, ...], n_data, axis=0)  # (D, A, A-1)
+        neighbors = np.repeat(neighbors[np.newaxis, ...], n_data, axis=0)  # (D, A, A)
 
         # mask based on zero atomic_numbers
-        mask = np.ones_like(atomic_numbers, dtype='int')                 #(D, A)
-        mask[np.where(atomic_numbers == 0)] = 0
-        max_atoms = np.sum(mask, axis=1)
+        mask = (atomic_numbers > 0).astype('int')  #(D, A)
 
-        neighbor_mask = (neighbors < np.tile(max_atoms.reshape(-1,1), n_atoms-1)[:,None,:]).astype('int')
-        neighbor_mask *= mask[:,:,None]  # (D,A,A-1)
-        neighbors *= neighbor_mask  # (D,A,A-1)
-
-        # atomic numbers
-        # atomic numbers are already in correct shape
-
-        if n_atoms < self.max_n_neighbors:
-            neighbors = padaxis(neighbors,
-                                self.max_n_neighbors,
-                                axis=-1,
-                                pad_value=-1)  # (D, A, N)
-            atomic_numbers = padaxis(atomic_numbers,
-                                     self.max_n_neighbors,
-                                     axis=-1,
-                                     pad_value=0)  # (D, A, N)
+        neighbor_mask = mask[:, :, np.newaxis] * mask[:, np.newaxis, :]  # (D, A, A)
+        neighbor_mask[:, np.arange(n_atoms), np.arange(n_atoms)] = 0
+        neighbors *= neighbor_mask  # (D, A, A)
 
         return neighbors, neighbor_mask, mask, None, None
 
@@ -202,32 +184,5 @@ class PeriodicEnvironment(object):
                     distance_vectors[i, j, :neighbor_count[i, j]] = staggered_distance_vectors[i][j]
                     neighbor_mask[i, j, :neighbor_count[i, j]] = 1
 
-
-        # # 2d array of all indices for all atoms in a single data point
-        # N = np.tile(np.arange(n_atoms), (n_atoms, 1))  # (A, A)
-
-        # # remove the diagonal self indices
-        # neighbors = N[~np.eye(n_atoms, dtype=bool)].reshape(n_atoms,
-        #                                                 -1)  # (A, A-1)
-        # neighbors = np.repeat(neighbors[np.newaxis, ...], n_data, axis=0)  # (D, A, A-1)
-
-        # max_atoms = np.sum(mask, axis=1)
-
-        # neighbor_mask = (neighbors < np.tile(max_atoms.reshape(-1,1), n_atoms-1)[:,None,:]).astype('int')
-        # neighbor_mask *= mask[:,:,None]  # (D,A,A-1)
-        # neighbors *= neighbor_mask  # (D,A,A-1)
-
-        # # atomic numbers
-        # # atomic numbers are already in correct shape
-
-        # if n_atoms < self.max_n_neighbors:
-        #     neighbors = padaxis(neighbors,
-        #                         self.max_n_neighbors,
-        #                         axis=-1,
-        #                         pad_value=-1)  # (D, A, N)
-        #     atomic_numbers = padaxis(atomic_numbers,
-        #                              self.max_n_neighbors,
-        #                              axis=-1,
-        #                              pad_value=0)  # (D, A, N)
 
         return neighbors, neighbor_mask, mask, distances, distance_vectors
