@@ -333,8 +333,8 @@ class Trainer:
         AM = []
         RM = []  # rotation angles/matrix
 
-        for val_step in range(steps):
-            val_batch = next(generator)
+        for val_step, val_batch in enumerate(generator):
+            # val_batch = next(generator)
 
             if self.hooks is not None and val_step == steps-1:
                 self.model.return_intermediate = True
@@ -388,7 +388,7 @@ class Trainer:
             if 'dEi' in val_preds and val_preds['dEi'] is not None:
                 fi.append(val_preds['dEi'].detach().cpu().numpy())
             AM.append(val_batch["AM"].detach().cpu().numpy())
-            RM.append(val_batch["RM"].detach().cpu().numpy())
+            # RM.append(val_batch["RM"].detach().cpu().numpy())
 
 
             if self.verbose:
@@ -408,7 +408,7 @@ class Trainer:
         outputs = dict()
         AM = standardize_batch(list(chain(*AM)))
         outputs['AM'] = AM
-        outputs['RM'] = np.concatenate(RM, axis=0)
+        # outputs['RM'] = np.concatenate(RM, axis=0)
         outputs['E_ae'] = np.concatenate(val_error_energy, axis=0)
         outputs['E_pred'] = np.concatenate(energy_pred,axis=0)
         outputs['E'] = np.concatenate(e, axis=0)
@@ -555,10 +555,11 @@ class Trainer:
             # if not self.verbose:
             #     step_iterator = tqdm(step_iterator)
 
-            for s in range(steps):
+            # for s in range(steps):
+            for s, train_batch in enumerate(train_generator):
                 self.optimizer.zero_grad()
 
-                train_batch = next(train_generator)
+                # train_batch = next(train_generator)
                 # self.model.module(train_batch)
                 # preds = self.model.forward(train_batch)
                 preds = self.model(train_batch)
