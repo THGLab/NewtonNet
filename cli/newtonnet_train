@@ -12,9 +12,9 @@ from newtonnet.models import NewtonNet
 
 from newtonnet.train import Trainer
 from newtonnet.data import parse_train_test
-from newtonnet.data import parse_ani_data
-from newtonnet.data import parse_methane_data
-from newtonnet.data import parse_t1x_data
+# from newtonnet.data import parse_ani_data
+# from newtonnet.data import parse_methane_data
+# from newtonnet.data import parse_t1x_data
 
 # torch.autograd.set_detect_anomaly(True)
 torch.set_default_tensor_type(torch.DoubleTensor)
@@ -31,6 +31,7 @@ parser.add_argument(
     required=True,
     help="The path to the Yaml configuration file.")
 
+# TODO: remove parser
 parser.add_argument(
     '-p',
     "--parser",
