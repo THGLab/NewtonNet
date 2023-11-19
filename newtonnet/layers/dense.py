@@ -38,16 +38,18 @@ class Dense(nn.Linear):
 
 
     """
-    def __init__(self,
-                 in_features,
-                 out_features,
-                 bias=True,
-                 activation=None,
-                 weight_init=xavier_uniform_,
-                 xavier_init_gain=1.,
-                 bias_init=zeros_,
-                 dropout=None,
-                 norm=None):
+    def __init__(
+            self,
+            in_features,
+            out_features,
+            bias=True,
+            activation=None,
+            weight_init=xavier_uniform_,
+            xavier_init_gain=1.,
+            bias_init=zeros_,
+            dropout=None,
+            norm=None,
+            ):
         self.weight_init = weight_init
         self.gain = xavier_init_gain
         self.bias_init = bias_init

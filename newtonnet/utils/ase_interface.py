@@ -64,7 +64,7 @@ class MLAseCalculator(Calculator):
 
         self.disagreement = disagreement
 
-        torch.set_default_tensor_type(torch.DoubleTensor)
+        # torch.set_default_tensor_type(torch.DoubleTensor)
         if type(model_path) is list:
             self.models = [self.load_model(model_path_, settings_path_) for model_path_, settings_path_ in zip(model_path, settings_path)]
         else:

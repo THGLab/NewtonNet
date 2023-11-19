@@ -17,7 +17,7 @@ from newtonnet.data import parse_train_test
 # from newtonnet.data import parse_t1x_data
 
 # torch.autograd.set_detect_anomaly(True)
-torch.set_default_tensor_type(torch.DoubleTensor)
+# torch.set_default_tensor_type(torch.DoubleTensor)
 
 # argument parser description
 parser = argparse.ArgumentParser(
