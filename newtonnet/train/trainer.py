@@ -317,7 +317,7 @@ class Trainer:
         loss = checkpoint['loss']
         return loss
 
-    def validation(self, name, generator, steps):
+    def validation(self, name, generator):
 
         self.model.eval()
         self.model.requires_dr = self.requires_dr
@@ -336,7 +336,7 @@ class Trainer:
         for val_step, val_batch in enumerate(generator):
             # val_batch = next(generator)
 
-            if self.hooks is not None and val_step == steps-1:
+            if self.hooks is not None and val_step == len(generator)-1:
                 self.model.return_intermediate = True
                 val_preds = self.model(val_batch)
 
@@ -398,7 +398,7 @@ class Trainer:
 
                 print(
                     "%s: %i/%i - E_loss(MAE): %.5f - F_loss(MAE): %.5f"
-                    % (name, val_step, steps,
+                    % (name, val_step, len(generator),
                        np.mean(np.concatenate(val_error_energy, axis=0)),
                        val_mae_force_report
                        ))
@@ -406,7 +406,7 @@ class Trainer:
             del val_batch
 
         outputs = dict()
-        AM = standardize_batch(list(chain(*AM)))
+        # AM = standardize_batch(list(chain(*AM)))
         outputs['AM'] = AM
         # outputs['RM'] = np.concatenate(RM, axis=0)
         outputs['E_ae'] = np.concatenate(val_error_energy, axis=0)
@@ -503,13 +503,11 @@ class Trainer:
     def train(self,
               train_generator,
               epochs,
-              steps,
+            #   steps,
               val_generator=None,
-              val_steps=None,
               irc_generator=None,
               irc_steps=None,
               test_generator=None,
-              test_steps=None,
               clip_grad=0):
         """
         The main function to train model for the given number of epochs (and steps per epochs).
@@ -599,12 +597,11 @@ class Trainer:
 
                     if self.verbose:
                         print(
-                            "Train: Epoch %i/%i - %i/%i - loss: %.5f - running_loss(RMSE): %.5f - E(MAE): %.5f - F(MAE): %.5f"
-                            % (self.epoch, epochs, s, steps, current_loss,
-                            np.sqrt(running_loss / (s + 1)),
-                            (ae_energy / (n_data)),
-                            (ae_force / (n_atoms*3))
-                            ))
+                            f"Train: Epoch {self.epoch}/{epochs} - {s}/{len(train_generator)} - loss: {current_loss:.5f} - "
+                            f"running_loss(RMSE): {np.sqrt(running_loss / (s + 1)):.5f} - "
+                            f"E(MAE): {(ae_energy / n_data):.5f} - F(MAE): {(ae_force / (n_atoms*3)):.5f}"
+                        )
+
                 elif self.mode == "atomic_properties":
                     target_name = 'Ai'
                     if self.target_name is not None:
@@ -620,13 +617,13 @@ class Trainer:
                     if self.verbose:
                         print(
                             "Train: Epoch %i/%i - %i/%i - loss: %.5f - running_loss(RMSE): %.5f - RMSE: %.5f"
-                            % (self.epoch, epochs, s, steps, current_loss,
+                            % (self.epoch, epochs, s, len(train_generator), current_loss,
                             np.sqrt(running_loss / (s + 1)),
                             (np.mean(rmse_ai[-100:]))
                             ))
                 del train_batch
 
-            running_loss /= steps
+            running_loss /= len(train_generator)
             if self.mode in ["energy/force", "energy"]:
                 ae_energy /= n_data
                 ae_force /= (n_atoms * 3)
@@ -643,7 +640,7 @@ class Trainer:
                 if val_generator is not None and \
                     self.epoch % self.check_val == 0:
 
-                    outputs = self.validation('valid', val_generator, val_steps)
+                    outputs = self.validation('valid', val_generator)
                     if self.requires_dr:
                         val_error = self.energy_loss_w * np.mean(outputs['E_ae']) + \
                                     self.force_loss_w * np.mean(outputs['F_ae_masked'])
@@ -656,7 +653,7 @@ class Trainer:
                 if val_generator is not None and \
                     self.epoch % self.check_val == 0:
 
-                    outputs = self.validation_atomic_properties('valid', "CS", val_generator, val_steps)
+                    outputs = self.validation_atomic_properties('valid', "CS", val_generator)
                     val_error = outputs["RMSE"]
 
             # best model
@@ -700,7 +697,7 @@ class Trainer:
                 # save test predictions
                 if test_generator is not None and self.epoch - last_test_epoch >= self.check_test:
                     if self.mode in ["energy/force", "energy"]:
-                        outputs = self.validation('test', test_generator, test_steps)
+                        outputs = self.validation('test', test_generator)
                         test_mae_E = np.mean(outputs['E_ae'])
                         test_mae_F = np.mean(outputs['F_ae_masked'])
                         # np.save(os.path.join(self.val_out_path, 'test_ae_E'), outputs['E_ae'])
@@ -712,7 +709,7 @@ class Trainer:
                         # np.save(os.path.join(self.val_out_path, 'test_AM'), outputs['AM'])
                         # np.save(os.path.join(self.val_out_path, 'test_RM'), outputs['RM'])
                     elif self.mode == "atomic_properties":
-                        outputs = self.validation_atomic_properties('test', "CS", test_generator, test_steps)
+                        outputs = self.validation_atomic_properties('test', "CS", test_generator)
                         # torch.save(outputs, os.path.join(self.val_out_path, 'test_results.pkl'))
                         test_error = outputs["RMSE"]
                     last_test_epoch = self.epoch
@@ -749,7 +746,7 @@ class Trainer:
                         'test_F(MAE)': test_mae_F,
                         "lr": old_lr,
                         "time": time.time() - t0},
-                        steps)
+                        len(train_generator))
                 elif self.mode == "atomic_properties":
                     self.store_checkpoint({
                         "loss(MSE)": running_loss,
@@ -758,7 +755,7 @@ class Trainer:
                         "test_err(RMSE)": test_error,
                         "lr": old_lr,
                         "time": time.time() - t0
-                    }, steps)
+                    }, len(train_generator))
 
     def log_statistics(self, n_train_data, n_val_data, n_test_data, normalizer, test_energy_hash):
         with open(os.path.join(self.output_path, "stats.txt"), "w") as f:
