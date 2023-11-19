@@ -59,7 +59,7 @@ else:
 
 # data
 if parser in ['md17', 'ccsd']:
-    train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, normalizer = parse_train_test(settings,device[0])
+    train_gen, val_gen, test_gen, normalizer = parse_train_test(settings,device[0])
     print('data set:', 'one of md17 data sets or a generic one.')
 elif parser in ['ani']:
     train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, n_train_data, n_val_data, n_test_data, normalizer, test_energy_hash = parse_ani_data(
@@ -196,13 +196,13 @@ trainer = Trainer(
 
 trainer.train(train_generator=train_gen,
               epochs=settings['training']['epochs'],
-              steps=tr_steps,
+            #   steps=tr_steps,
               val_generator=val_gen,
-              val_steps=val_steps,
+            #   val_steps=val_steps,
               irc_generator=None,
               irc_steps=None,
               test_generator=test_gen,
-              test_steps=test_steps,
+            #   test_steps=test_steps,
               clip_grad=1.0)
 
 print('done!')
