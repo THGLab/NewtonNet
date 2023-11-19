@@ -12,10 +12,10 @@ class BatchDataset(Dataset):
 
     """
     def __init__(self, input):
-        self.R = torch.tensor(input['R'])
+        self.R = torch.tensor(input['R'], dtype=torch.float)
         self.Z = torch.tensor(input['Z'], dtype=torch.long)
-        self.E = torch.tensor(input['E'])
-        self.F = torch.tensor(input['F'])
+        self.E = torch.tensor(input['E'], dtype=torch.float)
+        self.F = torch.tensor(input['F'], dtype=torch.float)
         N, NM, AM = ExtensiveEnvironment().get_environment(input['R'], input['Z'])
         self.AM = torch.tensor(AM, dtype=torch.long)
         self.N = torch.tensor(N, dtype=torch.long)

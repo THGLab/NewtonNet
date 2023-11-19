@@ -9,7 +9,7 @@ from newtonnet.train import Trainer
 from newtonnet.data import parse_train_test
 
 # torch.autograd.set_detect_anomaly(True)
-torch.set_default_tensor_type(torch.DoubleTensor)
+# torch.set_default_tensor_type(torch.DoubleTensor)
 
 # settings
 settings_path = 'config.yml'

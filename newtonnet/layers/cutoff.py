@@ -17,8 +17,8 @@ class PolynomialCutoff(nn.Module):
     """
     def __init__(self, cutoff=5.0, p=9):
         super(PolynomialCutoff, self).__init__()
-        self.register_buffer("cutoff", torch.FloatTensor([cutoff]))
-        self.register_buffer("p", torch.FloatTensor([p]))
+        self.register_buffer("cutoff", torch.tensor([cutoff], dtype=torch.float))
+        self.register_buffer("p", torch.tensor([p], dtype=torch.float))
 
     def forward(self, distances):
         """Compute cutoff.
@@ -59,7 +59,7 @@ class CosineCutoff(nn.Module):
     """
     def __init__(self, cutoff=5.0):
         super(CosineCutoff, self).__init__()
-        self.register_buffer("cutoff", torch.FloatTensor([cutoff]))
+        self.register_buffer("cutoff", torch.tensor([cutoff], dtype=torch.float))
 
     def forward(self, distances):
         """Compute cutoff.

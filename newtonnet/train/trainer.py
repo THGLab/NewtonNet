@@ -18,30 +18,32 @@ class Trainer:
     Parameters
     ----------
     """
-    def __init__(self,
-                 model,
-                 loss_fn,
-                 optimizer,
-                 requires_dr,
-                 device,
-                 yml_path,
-                 output_path,
-                 script_name,
-                 lr_scheduler,
-                 energy_loss_w,
-                 force_loss_w,
-                 loss_wf_decay,
-                 lambda_l1,
-                 checkpoint_log=1,
-                 checkpoint_val=1,
-                 checkpoint_test=20,
-                 checkpoint_model=1,
-                 verbose=False,
-                 training=True,
-                 hooks=None,
-                 mode="energy/force",
-                 target_name=None,
-                 force_latent=False):
+    def __init__(
+            self,
+            model,
+            loss_fn,
+            optimizer,
+            requires_dr,
+            device,
+            yml_path,
+            output_path,
+            script_name,
+            lr_scheduler,
+            energy_loss_w,
+            force_loss_w,
+            loss_wf_decay,
+            lambda_l1,
+            checkpoint_log=1,
+            checkpoint_val=1,
+            checkpoint_test=20,
+            checkpoint_model=1,
+            verbose=False,
+            training=True,
+            hooks=None,
+            mode="energy/force",
+            target_name=None,
+            force_latent=False,
+            ):
         self.model = model
         self.loss_fn = loss_fn
         self.optimizer = optimizer
@@ -102,7 +104,7 @@ class Trainer:
                 "val_err(RMSE)": [],
                 "test_err(RMSE)": []
             })
-        self.best_val_loss = float("inf")
+        self.best_val_loss = torch.inf
         self.mode = mode
         self.target_name = target_name
         self.force_latent = force_latent
@@ -634,7 +636,7 @@ class Trainer:
             # self.plot_grad_flow()
 
             # validation
-            val_error = float("inf")
+            val_error = torch.inf
             if self.mode in ["energy/force", "energy"]:
                 val_mae_E = val_mae_F = 0
                 if val_generator is not None and \
@@ -731,7 +733,7 @@ class Trainer:
 
                 for i, param_group in enumerate(
                         self.scheduler.optimizer.param_groups):
-                    old_lr = float(param_group["lr"])
+                    old_lr = param_group["lr"]
 
                 if self.mode in ["energy/force", "energy"]:
                     self.store_checkpoint({
