@@ -113,8 +113,6 @@ def parse_train_test(settings, device):
         data = BatchDataset(np.load(test_path))
         _, _, test_data = split(data, (0, 0, test_size))
 
-    random_state = settings['data'].get('random_states', 0)
-
     # extract data stats
     train_E = train_data.dataset.E[train_data.indices]
     normalizer = (train_E.mean(), train_E.std())
@@ -125,15 +123,9 @@ def parse_train_test(settings, device):
     val_batch_size = settings['training'].get('val_batch_size', 32)
     test_batch_size = settings['training'].get('test_batch_size', 32)
 
-    # steps
-    # train_steps = int(np.ceil(n_train_data / train_batch_size))
-    # val_steps = int(np.ceil(n_val_data / val_batch_size))
-    # test_steps= int(np.ceil(n_test_data / test_batch_size))
-
     train_gen = extensive_train_loader(
         data=train_data,
         batch_size=train_batch_size,
-        # device=device,
         shuffle=settings['training']['shuffle'],
         drop_last=settings['training']['drop_last'],
         )
@@ -141,15 +133,13 @@ def parse_train_test(settings, device):
     val_gen = extensive_train_loader(
         data=val_data,
         batch_size=val_batch_size,
-        # device=device,
         shuffle=settings['training']['shuffle'],
         drop_last=settings['training']['drop_last'],
         )
 
     test_gen = extensive_train_loader(
         data=test_data,
-        batch_size=val_batch_size,
-        # device=device,
+        batch_size=test_batch_size,
         shuffle=False,
         drop_last=False,
         )

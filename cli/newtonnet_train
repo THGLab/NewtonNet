@@ -31,21 +31,9 @@ parser.add_argument(
     required=True,
     help="The path to the Yaml configuration file.")
 
-# TODO: remove parser
-parser.add_argument(
-    '-p',
-    "--parser",
-    type=str,
-    required=False,
-    default='ccsd',
-    help="The name of dataset to select the appropriate parser. We provide data parsers for 'md17', 'ccsd', 'ani', 'hydroggen' and 'methane' data sets."\
-         "For all other data sets do not specify.")
-
-
 # define arguments
 args = parser.parse_args()
 config = args.config
-parser = args.parser
 
 # settings
 settings_path = config
@@ -58,49 +46,33 @@ else:
     device = [torch.device(settings['general']['device'])]
 
 # data
-if parser in ['md17', 'ccsd']:
-    train_gen, val_gen, test_gen, normalizer = parse_train_test(settings,device[0])
-    print('data set:', 'one of md17 data sets or a generic one.')
-elif parser in ['ani']:
-    train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, n_train_data, n_val_data, n_test_data, normalizer, test_energy_hash = parse_ani_data(
-        settings, device[0])
-    print('data set:', 'ANI')
-elif parser in ['methane']:
-    train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, n_train_data, n_val_data, n_test_data, normalizer, test_energy_hash = parse_methane_data(
-        settings, device[0])
-    print('data set:', 'Methane Combustion')
-elif parser in ['hydrogen']:
-    train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, n_train_data, n_val_data, n_test_data, normalizer, test_energy_hash = parse_methane_data(
-        settings, device[0])
-    print('data set:', 'Methane Combustion')
-elif parser in ['t1x']:
-    train_gen, val_gen, test_gen, tr_steps, val_steps, test_steps, normalizer = parse_t1x_data(settings, device[0])
-    print('data set:', 'Transition1x')
-
+torch.manual_seed(settings['data'].get('random_states', 42))
+train_gen, val_gen, test_gen, normalizer = parse_train_test(settings,device[0])
 print('normalizer: ', normalizer)
 
 # model
 # activation function
 activation = get_activation_by_string(settings['model']['activation'])
 
-model = NewtonNet(resolution=settings['model']['resolution'],
-               n_features=settings['model']['n_features'],
-               activation=activation,
-               n_interactions=settings['model']['n_interactions'],
-               dropout=settings['training']['dropout'],
-               max_z=settings['model']['max_z'],
-               cutoff=settings['data']['cutoff'],  ## data cutoff
-               cutoff_network=settings['model']['cutoff_network'],
-               normalizer=normalizer,
-               normalize_atomic=settings['model']['normalize_atomic'],
-               requires_dr=settings['model']['requires_dr'],
-               device=device[0],
-               create_graph=True,
-               shared_interactions=settings['model']['shared_interactions'],
-               return_hessian=settings['model']['return_hessian'],
-               double_update_latent=settings['model']['double_update_latent'],
-               layer_norm=settings['model']['layer_norm']
-               )
+model = NewtonNet(
+    resolution=settings['model']['resolution'],
+    n_features=settings['model']['n_features'],
+    activation=activation,
+    n_interactions=settings['model']['n_interactions'],
+    dropout=settings['training']['dropout'],
+    max_z=settings['model']['max_z'],
+    cutoff=settings['data']['cutoff'],  ## data cutoff
+    cutoff_network=settings['model']['cutoff_network'],
+    normalizer=normalizer,
+    normalize_atomic=settings['model']['normalize_atomic'],
+    requires_dr=settings['model']['requires_dr'],
+    device=device[0],
+    create_graph=True,
+    shared_interactions=settings['model']['shared_interactions'],
+    return_hessian=settings['model']['return_hessian'],
+    double_update_latent=settings['model']['double_update_latent'],
+    layer_norm=settings['model']['layer_norm'],
+    )
 
 # laod pre-trained model
 if settings['model']['pre_trained']:
@@ -109,9 +81,11 @@ if settings['model']['pre_trained']:
 
 # optimizer
 trainable_params = filter(lambda p: p.requires_grad, model.parameters())
-optimizer = Adam(trainable_params,
-                 lr=settings['training']['lr'],
-                 weight_decay=settings['training']['weight_decay'])
+optimizer = Adam(
+    trainable_params,
+    lr=settings['training']['lr'],
+    weight_decay=settings['training']['weight_decay'],
+    )
 
 # loss
 w_energy = settings['model']['w_energy']
@@ -194,15 +168,17 @@ trainer = Trainer(
 
 # tr_steps=1; val_steps=0; irc_steps=0; test_steps=0
 
-trainer.train(train_generator=train_gen,
-              epochs=settings['training']['epochs'],
-            #   steps=tr_steps,
-              val_generator=val_gen,
-            #   val_steps=val_steps,
-              irc_generator=None,
-              irc_steps=None,
-              test_generator=test_gen,
-            #   test_steps=test_steps,
-              clip_grad=1.0)
+trainer.train(
+    train_generator=train_gen,
+    epochs=settings['training']['epochs'],
+    # steps=tr_steps,
+    val_generator=val_gen,
+    # val_steps=val_steps,
+    irc_generator=None,
+    irc_steps=None,
+    test_generator=test_gen,
+    # test_steps=test_steps,
+    clip_grad=1.0,
+    )
 
 print('done!')
