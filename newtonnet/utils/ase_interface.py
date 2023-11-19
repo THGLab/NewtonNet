@@ -7,8 +7,7 @@ import yaml
 
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.models import NewtonNet
-from newtonnet.data import ExtensiveEnvironment
-from newtonnet.data import batch_dataset_converter
+from newtonnet.data import BatchDataset, extensive_train_loader
 
 
 ##-------------------------------------
@@ -74,7 +73,9 @@ class MLAseCalculator(Calculator):
 
     def calculate(self, atoms=None, properties=['energy','forces','hessian'], system_changes=None):
         super().calculate(atoms,properties,system_changes)
-        gen = self.extensive_data_loader(data=self.data_formatter(atoms), device=self.device[0])
+        data = self.data_formatter(atoms)
+        data = BatchDataset(data)
+        gen = extensive_train_loader(data, batch_size=len(data), shuffle=False, drop_last=False)
         for data in gen:
             energy = np.zeros((len(self.models), 1))
             forces = np.zeros((len(self.models), data['R'].shape[1], 3))
@@ -151,23 +152,24 @@ class MLAseCalculator(Calculator):
     def load_model(self, model_path, settings_path):
         settings = yaml.safe_load(open(settings_path, "r"))
         activation = get_activation_by_string(settings['model']['activation'])
-        model = NewtonNet(resolution=settings['model']['resolution'],
-                            n_features=settings['model']['n_features'],
-                            activation=activation,
-                            n_interactions=settings['model']['n_interactions'],
-                            dropout=settings['training']['dropout'],
-                            max_z=10,
-                            cutoff=settings['data']['cutoff'],  ## data cutoff
-                            cutoff_network=settings['model']['cutoff_network'],
-                            normalize_atomic=settings['model']['normalize_atomic'],
-                            requires_dr=settings['model']['requires_dr'],
-                            device=self.device[0],
-                            create_graph=False,
-                            shared_interactions=settings['model']['shared_interactions'],
-                            return_hessian=self.return_hessian,
-                            double_update_latent=settings['model']['double_update_latent'],
-                            layer_norm=settings['model']['layer_norm'],
-                            )
+        model = NewtonNet(
+            resolution=settings['model']['resolution'],
+            n_features=settings['model']['n_features'],
+            activation=activation,
+            n_interactions=settings['model']['n_interactions'],
+            dropout=settings['training']['dropout'],
+            max_z=10,
+            cutoff=settings['data']['cutoff'],  ## data cutoff
+            cutoff_network=settings['model']['cutoff_network'],
+            normalize_atomic=settings['model']['normalize_atomic'],
+            requires_dr=settings['model']['requires_dr'],
+            device=self.device[0],
+            create_graph=False,
+            shared_interactions=settings['model']['shared_interactions'],
+            return_hessian=self.return_hessian,
+            double_update_latent=settings['model']['double_update_latent'],
+            layer_norm=settings['model']['layer_norm'],
+            )
 
         model.load_state_dict(torch.load(model_path, map_location=self.device[0])['model_state_dict'], )
         model = model
@@ -225,12 +227,10 @@ class MLAseCalculator(Calculator):
         return data
 
 
-    def extensive_data_loader(self, data, device=None):
-        batch = {'R': data['R'], 'Z': data['Z'], 'E': data['E'], 'F': data['F']}
-        N, NM, AM, _, _ = ExtensiveEnvironment().get_environment(data['R'], data['Z'])
-        batch.update({'N': N, 'NM': NM, 'AM': AM})
-        batch = batch_dataset_converter(batch, device=device, batch_size=data['R'].shape[0], shuffle=False)
-        return batch
+    # def extensive_data_loader(self, data, device=None):
+    #     batch = {'R': data['R'], 'Z': data['Z'], 'E': data['E'], 'F': data['F']}
+    #     batch = BatchDataset(batch)
+    #     return batch
     
 
     def remove_outlier(self, data, idx):
