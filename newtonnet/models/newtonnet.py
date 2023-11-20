@@ -173,17 +173,7 @@ class NewtonNet(nn.Module):
         self.atomic_properties_only = atomic_properties_only
         self.aggregration = aggregration
 
-    def forward(self, data):
-
-        Z = data['Z']
-        R = data['R']
-        N = data['N']
-        NM = data['NM']
-        AM = data['AM']
-        if "lattice" in data:
-            lattice = data['lattice']
-        else:
-            lattice = None
+    def forward(self, Z, R, AM, N, NM, D=None, V=None, lattice=None):
 
         # initiate main containers
         a = self.embedding(Z)  # B,A,nf
@@ -197,9 +187,9 @@ class NewtonNet(nn.Module):
             R.requires_grad_()
 
         # compute distances (B,A,N) and distance vectors (B,A,N,3)
-        if 'D' in data:
-            distances = data['D']
-            distance_vector = data['V']
+        if D is not None and V is not None:
+            distances = D
+            distance_vector = V
         else:
             distances, distance_vector, N, NM = self.shell(R, N, NM, lattice)
 
