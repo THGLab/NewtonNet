@@ -33,7 +33,7 @@ class BatchDataset(Dataset):
         return output
 
     def __len__(self):
-        return self.R.size()[0]
+        return self.Z.shape[0]
 
 
 def extensive_train_loader(data,

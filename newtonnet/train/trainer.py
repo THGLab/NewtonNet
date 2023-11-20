@@ -40,7 +40,7 @@ class Trainer:
             verbose=False,
             training=True,
             hooks=None,
-            mode="energy/force",
+            mode='energy/force',
             target_name=None,
             force_latent=False,
             ):
@@ -362,7 +362,7 @@ class Trainer:
 
                 # self.model.return_intermediate = False
             else:
-                val_preds = self.model(val_batch)
+                val_preds = self.model(Z=val_batch['Z'], R=val_batch['R'], AM=val_batch['AM'], N=val_batch['N'], NM=val_batch['NM'])
 
             if val_preds['E'].ndim == 3:
                 E = val_batch["E"].unsqueeze(1).repeat(1,val_batch["Z"].shape[1],1)
@@ -408,7 +408,7 @@ class Trainer:
             del val_batch
 
         outputs = dict()
-        # AM = standardize_batch(list(chain(*AM)))
+        AM = standardize_batch(list(chain(*AM)))
         outputs['AM'] = AM
         # outputs['RM'] = np.concatenate(RM, axis=0)
         outputs['E_ae'] = np.concatenate(val_error_energy, axis=0)
@@ -562,11 +562,8 @@ class Trainer:
                 # train_batch = next(train_generator)
                 # self.model.module(train_batch)
                 # preds = self.model.forward(train_batch)
-                preds = self.model(train_batch)
-                loss = self.loss_fn(preds, train_batch, self.model.parameters(),
-                                    w_e=self.energy_loss_w,
-                                    w_f=w_f,
-                                    lambda_l1=self.lambda_l1)
+                preds = self.model(Z=train_batch['Z'], R=train_batch['R'], AM=train_batch['AM'], N=train_batch['N'], NM=train_batch['NM'])
+                loss = self.loss_fn(preds, train_batch, self.model.parameters())
                 loss.backward()
                 if clip_grad>0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)

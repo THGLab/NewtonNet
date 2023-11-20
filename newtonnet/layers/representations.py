@@ -33,6 +33,6 @@ class RadialBesselLayer(nn.Module):
         """
         d_scaled = distances * self.inv_cutoff
         d_scaled = d_scaled.unsqueeze(-1)
-        out = torch.sin(self.frequencies * d_scaled) #* self.inv_cutoff
+        out = torch.sin(self.frequencies * d_scaled) * self.inv_cutoff
 
         return out

@@ -91,14 +91,14 @@ class MLAseCalculator(Calculator):
                     #energy = self.model(data).detach().cpu().numpy()
                     #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
                     #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
-                    pred = model(data)
+                    pred = model(Z=data['Z'], R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
                     energy[model_] = pred['E'].detach().cpu().numpy() * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
                     del pred
             elif self.hess_method=='fwd_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(data)
+                    pred = model(Z=data['Z'], R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
@@ -110,7 +110,7 @@ class MLAseCalculator(Calculator):
                     del pred
             elif self.hess_method=='cnt_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(data)
+                    pred = model(Z=data['Z'], R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
@@ -122,7 +122,7 @@ class MLAseCalculator(Calculator):
                     del pred
             elif self.hess_method is None:
                 for model_, model in enumerate(self.models):
-                    pred = model(data)
+                    pred = model(Z=data['Z'], R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
                     del pred
