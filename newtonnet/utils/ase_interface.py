@@ -17,7 +17,7 @@ class MLAseCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, hess_method=None, hess_precision=None, disagreement='std', device='cpu', **kwargs):
+    def __init__(self, model_path, settings_path, hess_method=None, hess_precision=None, disagreement='std', device='cpu', script=False, trace_n_atoms=False, **kwargs):
         """
         Constructor for MLAseCalculator
 
@@ -52,6 +52,8 @@ class MLAseCalculator(Calculator):
             self.device = [torch.device(item) for item in device]
         else:
             self.device = [torch.device(device)]
+        self.script = script
+        self.trace_n_atoms = trace_n_atoms
 
         self.hess_method = hess_method
         if self.hess_method == 'autograd':
@@ -77,6 +79,11 @@ class MLAseCalculator(Calculator):
         data = BatchDataset(data)
         gen = extensive_train_loader(data, batch_size=len(data), shuffle=False, drop_last=False)
         for data in gen:
+            data['R'] = data['R'].to(self.device[0])
+            data['Z'] = data['Z'].to(self.device[0])
+            data['AM'] = data['AM'].to(self.device[0])
+            data['N'] = data['N'].to(self.device[0])
+            data['NM'] = data['NM'].to(self.device[0])
             energy = np.zeros((len(self.models), 1))
             forces = np.zeros((len(self.models), data['R'].shape[1], 3))
             hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
@@ -91,7 +98,7 @@ class MLAseCalculator(Calculator):
                     #energy = self.model(data).detach().cpu().numpy()
                     #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
                     #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
-                    pred = model(Z=data['Z'], R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
+                    pred = model(Z=data['Z'].to(self.device), R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
                     energy[model_] = pred['E'].detach().cpu().numpy() * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
@@ -175,6 +182,18 @@ class MLAseCalculator(Calculator):
         model = model
         model.to(self.device[0])
         model.eval()
+
+        if self.script:
+            model = torch.jit.script(model)
+        if self.trace_n_atoms:
+            model = torch.jit.trace(
+                model, (
+                    torch.ones((1, self.trace_n_atoms), dtype=torch.long), 
+                    torch.rand((1, self.trace_n_atoms, 3), dtype=torch.float), 
+                    torch.ones((1, self.trace_n_atoms), dtype=torch.long), 
+                    torch.tile(torch.arange(self.trace_n_atoms), (1, self.trace_n_atoms, 1)),
+                    1 - torch.eye(self.trace_n_atoms, dtype=torch.long)[None, :, :]))
+
         return model
     
 

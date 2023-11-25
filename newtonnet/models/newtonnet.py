@@ -1,8 +1,9 @@
 import torch
 from torch import nn
 from torch.autograd import grad
+from torch.jit.annotations import Optional
 
-from newtonnet.layers import Dense
+# from newtonnet.layers import Dense
 from newtonnet.layers.shells import ShellProvider
 from newtonnet.layers.scalers import ScaleShift, TrainableScaleShift
 from newtonnet.layers.cutoff import CosineCutoff, PolynomialCutoff
@@ -123,7 +124,8 @@ class NewtonNet(nn.Module):
                         activation=activation,
                         cutoff=cutoff,
                         cutoff_network=cutoff_network,
-                        double_update_latent=double_update_latent
+                        double_update_latent=double_update_latent,
+                        layer_norm=layer_norm,
                     )
                 ]
                 * n_interactions
@@ -138,16 +140,17 @@ class NewtonNet(nn.Module):
                         activation=activation,
                         cutoff=cutoff,
                         cutoff_network=cutoff_network,
-                        double_update_latent=double_update_latent
+                        double_update_latent=double_update_latent,
+                        layer_norm=layer_norm,
                     )
                     for _ in range(n_interactions)
                 ]
             )
 
         # layer norm
-        self.layer_norm = layer_norm
-        if layer_norm:
-            self.norm = nn.ModuleList([nn.LayerNorm(n_features) for _ in range(n_interactions)])
+        # self.layer_norm = layer_norm
+        # if layer_norm:
+        #     self.norm = nn.ModuleList([nn.LayerNorm(n_features) for _ in range(n_interactions)])
 
         # final dense network
         self.atomic_energy = AtomicEnergy(n_features, activation, dropout)
@@ -157,23 +160,28 @@ class NewtonNet(nn.Module):
             self.inverse_normalize = TrainableScaleShift(max_z)
         else:
             if type(normalizer) is dict:
-                self.inverse_normalize = nn.ModuleDict(
-                    {str(atom_num): ScaleShift(
-                        mean=torch.tensor(normalizer[atom_num][0],
-                                          device=device),
-                        stddev=torch.tensor(normalizer[atom_num][1],
-                                            device=device)) for atom_num in normalizer})
+                self.inverse_normalize = nn.ModuleDict({
+                    str(atom_num): ScaleShift(
+                        mean=torch.tensor(normalizer[atom_num][0], device=device),
+                        stddev=torch.tensor(normalizer[atom_num][1], device=device),
+                        ) for atom_num in normalizer
+                    })
             else:
-                self.inverse_normalize = ScaleShift(
-                    mean=torch.tensor(normalizer[0],
-                                      device=device),
-                    stddev=torch.tensor(normalizer[1],
-                                        device=device))
+                self.inverse_normalize = nn.ModuleDict({
+                    'all': ScaleShift(
+                        mean=torch.tensor(normalizer[0], device=device),
+                        stddev=torch.tensor(normalizer[1], device=device),
+                        )
+                    })
+                # self.inverse_normalize = ScaleShift(
+                #     mean=torch.tensor(normalizer[0], device=device),
+                #     stddev=torch.tensor(normalizer[1], device=device),
+                #     )
 
         self.atomic_properties_only = atomic_properties_only
         self.aggregration = aggregration
 
-    def forward(self, Z, R, AM, N, NM, D=None, V=None, lattice=None):
+    def forward(self, Z, R, AM, N, NM, D:Optional[torch.Tensor]=None, V:Optional[torch.Tensor]=None, lattice=None):
 
         # initiate main containers
         a = self.embedding(Z)  # B,A,nf
@@ -197,27 +205,29 @@ class NewtonNet(nn.Module):
         rbf = self.distance_expansion(distances)
 
         # compute interaction block and update atomic embeddings
-        for i_interax in range(self.n_interactions):
+        # for i_interax in range(self.n_interactions):
+        for dynamics_calculator in self.dycalc:
             # print('iter: ', i_interax)
 
             # messages
-            a, f_dir, f_dynamics, r_dynamics, e_dynamics = self.dycalc[i_interax](a, rbf, distances, distance_vector, N,
-                                                                                  NM,
-                                                                                  f_dir, f_dynamics, r_dynamics,
-                                                                                  e_dynamics
-                                                                                  )  # B,A,f  # B,A,N,f
+            a, f_dir, f_dynamics, r_dynamics, e_dynamics = dynamics_calculator(
+                a, rbf, distances, distance_vector, N, NM, f_dir, f_dynamics, r_dynamics, e_dynamics
+                )  # B,A,f  # B,A,N,f
 
-            if self.layer_norm:
-                a = self.norm[i_interax](a)
+            # if self.layer_norm:
+            #     a = self.norm[i_interax](a)
 
         # When using the network to obtain atomic properties only
         if self.atomic_properties_only:
             Ai = self.atomic_energy(a)
             if self.normalize_atomic:
                 Ai = self.inverse_normalize(Ai, Z)
-            else:
+            elif hasattr(self.inverse_normalize, 'keys') and hasattr(self.inverse_normalize, 'values'):
                 for atomic_type in self.inverse_normalize:
-                    atomic_filter = Z == int(atomic_type)
+                    if atomic_type == 'all':
+                        atomic_filter = Z > 0
+                    else:
+                        atomic_filter = Z == int(atomic_type)
                     Ai[atomic_filter] = self.inverse_normalize[atomic_type](Ai[atomic_filter])
             return {'Ai': Ai}
 
@@ -225,6 +235,13 @@ class NewtonNet(nn.Module):
         Ei = self.atomic_energy(a)
         if self.normalize_atomic:
             Ei = self.inverse_normalize(Ei, Z)
+        elif hasattr(self.inverse_normalize, 'keys') and hasattr(self.inverse_normalize, 'values'):
+            for atomic_type in self.inverse_normalize:
+                if atomic_type == 'all':
+                    atomic_filter = Z > 0
+                else:
+                    atomic_filter = Z == int(atomic_type)
+                Ei[atomic_filter] = self.inverse_normalize[atomic_type](Ei[atomic_filter])
 
         # inverse normalize
         Ei = Ei * AM[..., None]  # (B,A,1)
@@ -234,30 +251,38 @@ class NewtonNet(nn.Module):
             E = torch.mean(Ei, 1)
         elif self.aggregration == 'max':
             E = torch.max(Ei, 1).values
-        if not self.normalize_atomic:
-            E = self.inverse_normalize(E)
+        else:
+            raise ValueError('Unknown aggregration method: {}'.format(self.aggregration))
+        # if not self.normalize_atomic:
+            # E = self.inverse_normalize(E)
 
         # if self.return_hessian:
         #     return E
 
         if self.requires_dr:
             if self.return_hessian:
-                dE = grad(E, R, grad_outputs=torch.ones(E.shape[0], 1, device=R.device), create_graph=True, retain_graph=True)[0]
-                ddE = torch.zeros(E.shape[0], R.shape[1], R.shape[2], R.shape[1], R.shape[2], device=R.device)
-                for A_ in range(R.shape[1]):
-                    for X_ in range(3):
-                        ddE[:, A_, X_, :, :] = grad(dE[:, A_, X_], R, grad_outputs=torch.ones(E.shape[0], device=R.device), create_graph=False, retain_graph=True)[0]
+                dE = grad([E], [R], grad_outputs=[torch.ones(E.shape[0], 1, device=R.device) if E.shape[0]==R.shape[0] else None], create_graph=True, retain_graph=True)[0]
+                # TODO: make Hessian calculations work
+                # ddE = torch.zeros(E.shape[0], R.shape[1], R.shape[2], R.shape[1], R.shape[2], device=R.device)
+                # for A_ in range(R.shape[1]):
+                #     for X_ in range(R.shape[2]):
+                #         dE[:, A_, X_]
+                #         ddE[:, A_, X_, :, :] = grad(dE[:, A_, X_], R, grad_outputs=torch.ones(E.shape[0], device=R.device), create_graph=False, retain_graph=True)[0]
                 # ddE = torch.stack([grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True, allow_unused=True)[0] for V in torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1)])
                 # ddE = torch.vmap(lambda V: grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True))(torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1))
                 # ddE = ddE.permute(1,2,3,0).unflatten(dim=3, sizes=(-1, 3))
             else:
-                dE = grad(E, R, grad_outputs=torch.ones(E.shape[0], 1, device=R.device), create_graph=self.create_graph, retain_graph=True)[0]
-            dE = -1.0 * dE
+                dE = grad([E], [R], grad_outputs=[torch.ones(E.shape[0], 1, device=R.device) if E.shape[0]==R.shape[0] else None], create_graph=True, retain_graph=True)[0]
         else:
-            dE = data['F']
+            # dE = data['F']
+            dE = torch.zeros_like(R)
+        assert dE is not None
+        dE = -dE
 
         if self.return_hessian:
-            return {'R': R, 'E': E, 'F': dE, 'H': ddE, 'Ei': Ei, 'F_latent': f_dir}
+            # TODO: make Hessian calculations work
+            # return {'R': R, 'E': E, 'F': dE, 'H': ddE, 'Ei': Ei, 'F_latent': f_dir}
+            return {'R': R, 'E': E, 'F': dE, 'Ei': Ei, 'F_latent': f_dir}
         else:
             return {'R': R, 'E': E, 'F': dE, 'Ei': Ei, 'F_latent': f_dir}
 
@@ -272,7 +297,8 @@ class DynamicsCalculator(nn.Module):
             cutoff,
             cutoff_network,
             double_update_latent=True,
-            epsilon=1e-8
+            epsilon=1e-8,
+            layer_norm=False,
     ):
         super(DynamicsCalculator, self).__init__()
 
@@ -280,11 +306,15 @@ class DynamicsCalculator(nn.Module):
         self.epsilon = epsilon
 
         # non-directional message passing
-        self.phi_rbf = Dense(resolution, n_features, activation=None)
+        # self.phi_rbf = Dense(resolution, n_features, activation=None)
+        self.phi_rbf = nn.Linear(resolution, n_features)
 
         self.phi_a = nn.Sequential(
-            Dense(n_features, n_features, activation=activation),
-            Dense(n_features, n_features, activation=None),
+            # Dense(n_features, n_features, activation=activation),
+            # Dense(n_features, n_features, activation=None),
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
         )
 
         # cutoff layer used in interaction block
@@ -294,29 +324,46 @@ class DynamicsCalculator(nn.Module):
             self.cutoff_network = CosineCutoff(cutoff)
 
         # directional message passing
-        self.phi_f = Dense(n_features, 1, activation=None, bias=False)
+        # self.phi_f = Dense(n_features, 1, activation=None, bias=False)
+        self.phi_f = nn.Linear(n_features, 1, bias=False)
         self.phi_f_scale = nn.Sequential(
-            Dense(n_features, n_features, activation=activation),
-            Dense(n_features, n_features, activation=None),
+            # Dense(n_features, n_features, activation=activation),
+            # Dense(n_features, n_features, activation=None),
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
         )
         self.phi_r = nn.Sequential(
-            Dense(n_features, n_features, activation=None),
+            # Dense(n_features, n_features, activation=None),
+            nn.Linear(n_features, n_features),
         )
         self.phi_r = nn.Sequential(
-            Dense(n_features, n_features, activation=activation, xavier_init_gain=0.001),
-            Dense(n_features, n_features, activation=None),
+            # Dense(n_features, n_features, activation=activation, xavier_init_gain=0.001),
+            # Dense(n_features, n_features, activation=None),
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
         )
         self.phi_r_ext = nn.Sequential(
-            Dense(n_features, n_features, activation=activation, bias=False),
-            Dense(n_features, n_features, activation=None, bias=False),
+            # Dense(n_features, n_features, activation=activation, bias=False),
+            # Dense(n_features, n_features, activation=None, bias=False),
+            nn.Linear(n_features, n_features, bias=False),
+            activation,
+            nn.Linear(n_features, n_features, bias=False),
         )
 
         self.phi_e = nn.Sequential(
-            Dense(n_features, n_features, activation=activation),
-            Dense(n_features, n_features, activation=None)
+            # Dense(n_features, n_features, activation=activation),
+            # Dense(n_features, n_features, activation=None)
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
         )
 
         self.double_update_latent = double_update_latent
+
+        self.layer_norm = layer_norm
+        self.norm = nn.LayerNorm(n_features)
 
     def gather_neighbors(self, inputs, N):
         n_features = inputs.size()[-1]
@@ -335,7 +382,7 @@ class DynamicsCalculator(nn.Module):
             out = torch.gather(inputs, dim=1, index=N)
             return out.view(b, a, n, 3, n_features)  # B,A,N,3,n_features
 
-    def sum_neighbors(self, x, mask, dim=2, avg=False):
+    def sum_neighbors(self, x, mask, dim:int=2, avg:bool=False):
         """
 
         Parameters
@@ -388,6 +435,7 @@ class DynamicsCalculator(nn.Module):
 
         # look up neighboring atoms features based on the schnet contiuous filter implementation
         aj_msij = self.gather_neighbors(a_msij, N)  # B,A,N,nf
+        assert aj_msij is not None
 
         # symmetric feature multiplication
         mij = rbf_msij * aj_msij
@@ -411,6 +459,7 @@ class DynamicsCalculator(nn.Module):
         dr_i = self.phi_r(a).unsqueeze(-2) * F_i  # B,A,3,nf
 
         dr_j = self.gather_neighbors(r_dynamics, N)  # B,A,N,3,nf
+        assert dr_j is not None
         dr_j = self.phi_r_ext(msij).unsqueeze(-2) * dr_j  # B,A,N,3,nf
         # print('dr_j:', dr_j.shape, dr_j[0,0])
         dr_ext = self.sum_neighbors(dr_j, NM, dim=2, avg=False)  # B,A,3,nf
@@ -425,6 +474,10 @@ class DynamicsCalculator(nn.Module):
         a = a + de_i
         e_dynamics = e_dynamics + de_i
 
+        # layer norm
+        if self.layer_norm:
+            a = self.norm(a)
+
         return a, f_dir, f_dynamics, r_dynamics, e_dynamics
 
 
@@ -433,18 +486,16 @@ class AtomicEnergy(nn.Module):
     def __init__(self, n_features, activation, dropout):
         super(AtomicEnergy, self).__init__()
         self.environment = nn.Sequential(
-            Dense(n_features, 128,
-                  activation=activation,
-                  dropout=dropout,
-                  norm=False),
-            Dense(128, 64,
-                  activation=activation,
-                  dropout=dropout,
-                  norm=False),
-            Dense(64, 1,
-                  activation=None,
-                  dropout=0.0,
-                  norm=False),
+            # Dense(n_features, 128, activation=activation, dropout=dropout, norm=False),
+            # Dense(128, 64, activation=activation, dropout=dropout, norm=False),
+            # Dense(64, 1, activation=None, dropout=0.0, norm=False),
+            nn.Linear(n_features, 128),
+            activation,
+            nn.Dropout(dropout),
+            nn.Linear(128, 64),
+            activation,
+            nn.Dropout(dropout),
+            nn.Linear(64, 1),
         )
 
     def forward(self, a):

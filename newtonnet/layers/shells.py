@@ -14,11 +14,13 @@ class ShellProvider(nn.Module):
     ----------
 
     """
-    def __init__(self,
-                 return_vecs=False,
-                 normalize_vecs=False,
-                 pbc=False,
-                 cutoff=None):
+    def __init__(
+            self,
+            return_vecs=False,
+            normalize_vecs=False,
+            pbc=False,
+            cutoff=None,
+            ):
         super(ShellProvider, self).__init__()
         self.return_vecs = return_vecs
         self.normalize_vecs = normalize_vecs
@@ -26,11 +28,13 @@ class ShellProvider(nn.Module):
         self.pbc = pbc
         self.cutoff = cutoff
 
-    def forward(self,
-                atoms,
-                neighbors,
-                neighbor_mask=None,
-                lattice=None):
+    def forward(
+            self,
+            atoms,
+            neighbors,
+            neighbor_mask=None,
+            lattice=None,
+            ):
         """
         The main driver to calculate distances of atoms in a shell from center atom.
 
@@ -67,9 +71,7 @@ class ShellProvider(nn.Module):
         """
         # Construct auxiliary index vector
         B, A, _ = atoms.size()
-        idx_m = torch.arange(B, device=atoms.device, dtype=torch.long)[
-                :, None, None
-                ]
+        idx_m = torch.arange(B, device=atoms.device, dtype=torch.long)[:, None, None]
 
         # Get atomic positions of all neighboring indices
         ngh_atoms_xyz = atoms[idx_m, neighbors[:, :, :], :]
@@ -80,9 +82,15 @@ class ShellProvider(nn.Module):
 
         # pbc: for distance in a direction (d) and boxlength (L), d = (d + L/2) % L - L/2
         if self.pbc:
-            lattice_shift_arr = torch.tensor([[i, j, k] for i in [-1, 0, 1] for j in [-1, 0, 1] for k in [-1, 0, 1]],
-                                             dtype=lattice.dtype,
-                                             device=lattice.device)  # 27 x 3
+            # lattice_shift_arr = torch.tensor(
+            #     [[i, j, k] for i in [-1, 0, 1] for j in [-1, 0, 1] for k in [-1, 0, 1]],
+            #     dtype=lattice.dtype,
+            #     device=lattice.device)  # 27 x 3
+            lattice_shift_arr = torch.tensor(
+                [[[[i, j, k] for i in (-1, 0, 1)] for j in (-1, 0, 1)] for k in (-1, 0, 1)],
+                dtype=lattice.dtype,
+                device=lattice.device,
+                ).reshape((27, 3))  # 27 x 3
             lattice_batchlast = lattice.view((-1, 3, 3)).moveaxis(0, 2) # 3 x 3 x B
             distance_shift_arr = torch.tensordot(lattice_shift_arr, lattice_batchlast, 1).moveaxis(2, 1) # 27 x B x 3
             distance_vector_pbc = distance_vector[None] + distance_shift_arr[:, :, None, None] # 27 x B x A x N x 3
@@ -152,12 +160,12 @@ class ShellProvider(nn.Module):
                     neighbors[i, j, :neighbor_counts[i, j]] = temporal_neighbor[i][j]
                     neighbor_mask[i, j, :neighbor_counts[i, j]] = temporal_neighbor_mask[i][j]
 
-        if self.return_vecs:
-            tmp_distances = torch.ones_like(distances)
-            tmp_distances[neighbor_mask != 0] = distances[neighbor_mask != 0] + self.epsilon
+        # if self.return_vecs:
+        tmp_distances = torch.ones_like(distances)
+        tmp_distances[neighbor_mask != 0] = distances[neighbor_mask != 0] + self.epsilon
 
-            if self.normalize_vecs:
-                distance_vector = distance_vector / tmp_distances[:, :, :, None]
-            return distances, distance_vector, neighbors, neighbor_mask
+        if self.normalize_vecs:
+            distance_vector = distance_vector / tmp_distances[:, :, :, None]
+        return distances, distance_vector, neighbors, neighbor_mask
 
-        return distances, neighbors, neighbor_mask
+        # return distances, neighbors, neighbor_mask
