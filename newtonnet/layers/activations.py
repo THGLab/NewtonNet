@@ -5,7 +5,8 @@ import numpy as np
 
 def get_activation_by_string(key):
     if key == "swish":
-        activation = swish
+        # activation = swish
+        activation = nn.SiLU()
     elif key == 'relu':
         activation = nn.ReLU()
     elif key == 'ssp':
