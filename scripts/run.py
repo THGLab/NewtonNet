@@ -29,10 +29,10 @@ print('normalizer: ', normalizer)
 # activation function
 activation = get_activation_by_string(settings['model']['activation'])
 
-model = NewtonNet(resolution=settings['model']['resolution'],
+model = NewtonNet(n_basis=settings['model']['resolution'],
                n_features=settings['model']['n_features'],
                activation=activation,
-               n_interactions=settings['model']['n_interactions'],
+               n_layers=settings['model']['n_interactions'],
                dropout=settings['training']['dropout'],
                max_z=10,
                cutoff=settings['data']['cutoff'],  ## data cutoff
@@ -42,7 +42,7 @@ model = NewtonNet(resolution=settings['model']['resolution'],
                requires_dr=settings['model']['requires_dr'],
                device=device[0],
                create_graph=True,
-               shared_interactions=settings['model']['shared_interactions'],
+               share_layers=settings['model']['shared_interactions'],
                return_latent=settings['model']['return_latent'],
                double_update_latent=settings['model']['double_update_latent'],
                layer_norm=settings['model']['layer_norm'],

@@ -362,7 +362,15 @@ class Trainer:
 
                 # self.model.return_intermediate = False
             else:
-                val_preds = self.model(Z=val_batch['Z'], R=val_batch['R'], AM=val_batch['AM'], N=val_batch['N'], NM=val_batch['NM'])
+                val_preds = self.model(
+                    atomic_numbers=val_batch['Z'], 
+                    positions=val_batch['R'], 
+                    atom_mask=val_batch['AM'], 
+                    neighbors=val_batch['N'], 
+                    neighbor_mask=val_batch['NM'],
+                    distances=val_batch['D'],
+                    distance_vectors=val_batch['V'],
+                    )
 
             if val_preds['E'].ndim == 3:
                 E = val_batch["E"].unsqueeze(1).repeat(1,val_batch["Z"].shape[1],1)
@@ -562,7 +570,15 @@ class Trainer:
                 # train_batch = next(train_generator)
                 # self.model.module(train_batch)
                 # preds = self.model.forward(train_batch)
-                preds = self.model(Z=train_batch['Z'], R=train_batch['R'], AM=train_batch['AM'], N=train_batch['N'], NM=train_batch['NM'])
+                preds = self.model(
+                    atomic_numbers=train_batch['Z'], 
+                    positions=train_batch['R'], 
+                    atom_mask=train_batch['AM'], 
+                    neighbors=train_batch['N'], 
+                    neighbor_mask=train_batch['NM'],
+                    distances=train_batch['D'],
+                    distance_vectors=train_batch['V'],
+                    )
                 loss = self.loss_fn(preds, train_batch, self.model.parameters())
                 loss.backward()
                 if clip_grad>0:

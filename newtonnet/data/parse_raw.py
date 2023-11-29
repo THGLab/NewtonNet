@@ -1,39 +1,9 @@
-import os
 import numpy as np
-import warnings
-from collections import defaultdict
-from numpy.lib.function_base import append
-from sklearn.utils import random
-from sklearn.utils.random import sample_without_replacement
-from sklearn.model_selection import train_test_split
 
 from torch.utils.data import random_split
-from newtonnet.data import BatchDataset
-from newtonnet.data import extensive_train_loader
-
-from ase.io import iread
-import math
-import pickle
-
-def concat_listofdicts(listofdicts, axis=0):
-    """
-
-    Parameters
-    ----------
-    listofdicts: list
-        values must be 2d arrays
-    axis: int
-
-    Returns
-    -------
-    dict
-
-    """
-    data = dict()
-    for k in listofdicts[0].keys():
-        data[k] = np.concatenate([d[k] for d in listofdicts], axis=axis)
-
-    return data
+from torch.utils.data import DataLoader
+from newtonnet.data import MolecularDataset
+from newtonnet.data import NeighborEnvironment
 
 
 def split(data, data_sizes):
@@ -75,6 +45,11 @@ def parse_train_test(settings, device):
     tuple: tuple of mean and standard deviation of energies in the training data
 
     """
+    # environment
+    cutoff = settings['data'].get('cutoff', 5.0)
+    periodic_boundary = settings['data'].get('periodic_boundary', False)
+    environment = NeighborEnvironment(cutoff=cutoff, periodic_boundary=periodic_boundary)
+
     # meta data
     train_path = settings['data'].get('train_path', None)
     val_path = settings['data'].get('val_path', train_path)
@@ -84,33 +59,33 @@ def parse_train_test(settings, device):
     test_size = settings['data'].get('test_size', -1)
     if train_path == val_path == test_path:
         print('Use training data for validation and test.')
-        data = BatchDataset(np.load(train_path))
+        data = MolecularDataset(np.load(train_path), environment=environment)
         train_data, val_data, test_data = split(data, (train_size, val_size, test_size))
     elif train_path == val_path:
         print('Use training data for validation.')
-        data = BatchDataset(np.load(train_path))
+        data = MolecularDataset(np.load(train_path), environment=environment)
         train_data, val_data = split(data, (train_size, val_size, 0))
-        data = BatchDataset(np.load(test_path))
+        data = MolecularDataset(np.load(test_path), environment=environment)
         _, _, test_data = split(data, (0, 0, test_size))
     elif train_path == test_path:
         print('Use training data for test.')
-        data = BatchDataset(np.load(train_path))
+        data = MolecularDataset(np.load(train_path), environment=environment)
         train_data, _, test_data = split(data, (train_size, 0, test_size))
-        data = BatchDataset(np.load(val_path))
+        data = MolecularDataset(np.load(val_path), environment=environment)
         _, val_data, _ = split(data, (0, val_size, 0))
     elif val_path == test_path:
         print('Use validation data for test.')
-        data = BatchDataset(np.load(train_path))
+        data = MolecularDataset(np.load(train_path), environment=environment)
         train_data, _, _, = split(data, (train_size, 0, 0))
-        data = BatchDataset(np.load(val_path))
+        data = MolecularDataset(np.load(val_path), environment=environment)
         _, val_data, test_data = split(data, (0, val_size, test_size))
     else:
         print('Use separate training, validation, and test data.')
-        data = BatchDataset(np.load(train_path))
+        data = MolecularDataset(np.load(train_path), environment=environment)
         train_data, _, _ = split(data, (train_size, 0, 0))
-        data = BatchDataset(np.load(val_path))
+        data = MolecularDataset(np.load(val_path), environment=environment)
         _, val_data, _ = split(data, (0, val_size, 0))
-        data = BatchDataset(np.load(test_path))
+        data = MolecularDataset(np.load(test_path), environment=environment)
         _, _, test_data = split(data, (0, 0, test_size))
 
     # extract data stats
@@ -123,22 +98,22 @@ def parse_train_test(settings, device):
     val_batch_size = settings['training'].get('val_batch_size', 32)
     test_batch_size = settings['training'].get('test_batch_size', 32)
 
-    train_gen = extensive_train_loader(
-        data=train_data,
+    train_gen = DataLoader(
+        dataset=train_data,
         batch_size=train_batch_size,
         shuffle=settings['training']['shuffle'],
         drop_last=settings['training']['drop_last'],
         )
 
-    val_gen = extensive_train_loader(
-        data=val_data,
+    val_gen = DataLoader(
+        dataset=val_data,
         batch_size=val_batch_size,
         shuffle=settings['training']['shuffle'],
         drop_last=settings['training']['drop_last'],
         )
 
-    test_gen = extensive_train_loader(
-        data=test_data,
+    test_gen = DataLoader(
+        dataset=test_data,
         batch_size=test_batch_size,
         shuffle=False,
         drop_last=False,

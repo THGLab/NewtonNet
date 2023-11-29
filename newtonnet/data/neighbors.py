@@ -8,24 +8,22 @@ Each Molecule is represented as a dictionary with following keys:
     - mol_prop: molecular property with shape (1, n_mol_prop)
 
 """
-import numpy as np
+import torch
+from newtonnet.layers.shells import ShellProvider
 
-class ExtensiveEnvironment(object):
+class NeighborEnvironment(object):
     """
     Provide atomic environment of an array of atoms and their atomic numbers.
-    No cutoff, No periodic boundary condition
-
-    Parameters
-    ----------
-    max_n_neighbors: int, optional (default: None)
-        maximum number of neighbors to pad arrays if they have less elements
-        if None, it will be ignored (e.g., in case all atoms have same length)
 
     """
-    def __init__(self, max_n_neighbors=None):
-        if max_n_neighbors is None:
-            max_n_neighbors = 0
-        self.max_n_neighbors = max_n_neighbors
+    def __init__(
+            self, 
+            cutoff: float = 5.0,
+            periodic_boundary: bool = False,
+            ):
+        self.cutoff = cutoff
+        self.periodic_boundary = periodic_boundary
+        self.shell = ShellProvider(cutoff=cutoff, periodic_boundary=periodic_boundary)
 
     def _check_shapes(self, Rshape, Zshape):
         if Rshape[0] != Zshape[0]:
@@ -40,7 +38,7 @@ class ExtensiveEnvironment(object):
             msg = "@ExtensiveEnvironment: atoms and atomic_numbers must have same dimension 1 (n_atoms)."
             raise ValueError(msg)
 
-    def get_environment(self, positions, atomic_numbers):
+    def get_environment(self, positions, atomic_numbers, lattice=torch.eye(3)):
         """
         This function finds atomic environments extensively for each atom in the frame.
 
@@ -60,22 +58,22 @@ class ExtensiveEnvironment(object):
         ndarray: 2D array of atomic mask for atomic energies (D, A)
 
         """
-        n_data = positions.shape[0]  # D
-        n_atoms = positions.shape[1]  # A
+    
+        n_data, n_atoms, _ = positions.shape
 
         self._check_shapes(positions.shape, atomic_numbers.shape)
 
-        neighbors = np.tile(np.arange(n_atoms), (n_atoms, 1))  # (A, A)
-
-        # remove the diagonal self indices
-        neighbors = np.repeat(neighbors[np.newaxis, ...], n_data, axis=0)  # (D, A, A)
+        neighbors = torch.arange(n_atoms, dtype=torch.long)[None, None, :].expand(n_data, n_atoms, -1)  # n_data, n_atoms, n_atoms
 
         # mask based on zero atomic_numbers
-        mask = (atomic_numbers > 0).astype('int')  #(D, A)
+        atom_mask = (atomic_numbers > 0).long()  # n_data, n_atoms
 
-        neighbor_mask = mask[:, :, np.newaxis] * mask[:, np.newaxis, :]  # (D, A, A)
-        neighbor_mask[:, np.arange(n_atoms), np.arange(n_atoms)] = 0
-        neighbors *= neighbor_mask  # (D, A, A)
+        neighbor_mask = atom_mask[:, :, None] * atom_mask[:, None, :]  # n_data, n_atoms, n_atoms
+        neighbor_mask[:, torch.arange(n_atoms), torch.arange(n_atoms)] = 0
+        neighbors = neighbors * neighbor_mask  # n_data, n_atoms, n_atoms
 
-        return neighbors, neighbor_mask, mask
+        distances, distance_vectors, neighbors, neighbor_mask = self.shell(positions, neighbors, neighbor_mask, lattice)
+
+        return neighbors, neighbor_mask, atom_mask, distances, distance_vectors
+    
     

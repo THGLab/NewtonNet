@@ -12,6 +12,7 @@ from newtonnet.models import NewtonNet
 
 from newtonnet.train import Trainer
 from newtonnet.data import parse_train_test
+from newtonnet.layers.cutoff import CosineCutoff, PolynomialCutoff
 # from newtonnet.data import parse_ani_data
 # from newtonnet.data import parse_methane_data
 # from newtonnet.data import parse_t1x_data
@@ -47,28 +48,32 @@ else:
 
 # data
 torch.manual_seed(settings['data'].get('random_states', 42))
-train_gen, val_gen, test_gen, normalizer = parse_train_test(settings,device[0])
+train_gen, val_gen, test_gen, normalizer = parse_train_test(settings, device[0])
 print('normalizer: ', normalizer)
 
 # model
 # activation function
 activation = get_activation_by_string(settings['model']['activation'])
+if settings['model']['cutoff_network'] == 'poly':
+    cutoff_network = PolynomialCutoff(cutoff=settings['data']['cutoff'])
+elif settings['model']['cutoff_network'] == 'cos':
+    cutoff_network = CosineCutoff(cutoff=settings['data']['cutoff'])
 
 model = NewtonNet(
-    resolution=settings['model']['resolution'],
+    n_basis=settings['model']['resolution'],
     n_features=settings['model']['n_features'],
     activation=activation,
-    n_interactions=settings['model']['n_interactions'],
+    n_layers=settings['model']['n_interactions'],
     dropout=settings['training']['dropout'],
     max_z=settings['model']['max_z'],
     cutoff=settings['data']['cutoff'],  ## data cutoff
-    cutoff_network=settings['model']['cutoff_network'],
+    cutoff_network=cutoff_network,
     normalizer=normalizer,
     normalize_atomic=settings['model']['normalize_atomic'],
     requires_dr=settings['model']['requires_dr'],
     device=device[0],
     create_graph=True,
-    shared_interactions=settings['model']['shared_interactions'],
+    share_layers=settings['model']['shared_interactions'],
     return_hessian=settings['model']['return_hessian'],
     double_update_latent=settings['model']['double_update_latent'],
     layer_norm=settings['model']['layer_norm'],
