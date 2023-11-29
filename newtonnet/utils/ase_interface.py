@@ -6,8 +6,9 @@ import torch.autograd.functional as F
 import yaml
 
 from newtonnet.layers.activations import get_activation_by_string
+from newtonnet.layers.cutoff import CosineCutoff, PolynomialCutoff
 from newtonnet.models import NewtonNet
-from newtonnet.data import BatchDataset, extensive_train_loader
+from newtonnet.data import MolecularDataset, extensive_train_loader
 
 
 ##-------------------------------------
@@ -76,7 +77,7 @@ class MLAseCalculator(Calculator):
     def calculate(self, atoms=None, properties=['energy','forces','hessian'], system_changes=None):
         super().calculate(atoms,properties,system_changes)
         data = self.data_formatter(atoms)
-        data = BatchDataset(data)
+        data = MolecularDataset(data)
         gen = extensive_train_loader(data, batch_size=len(data), shuffle=False, drop_last=False)
         for data in gen:
             data['R'] = data['R'].to(self.device[0])
@@ -98,14 +99,14 @@ class MLAseCalculator(Calculator):
                     #energy = self.model(data).detach().cpu().numpy()
                     #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
                     #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
-                    pred = model(Z=data['Z'].to(self.device), R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'])
                     energy[model_] = pred['E'].detach().cpu().numpy() * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
                     del pred
             elif self.hess_method=='fwd_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(Z=data['Z'], R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
@@ -117,7 +118,7 @@ class MLAseCalculator(Calculator):
                     del pred
             elif self.hess_method=='cnt_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(Z=data['Z'], R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
@@ -129,7 +130,7 @@ class MLAseCalculator(Calculator):
                     del pred
             elif self.hess_method is None:
                 for model_, model in enumerate(self.models):
-                    pred = model(Z=data['Z'], R=data['R'], AM=data['AM'], N=data['N'], NM=data['NM'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
                     del pred
@@ -159,20 +160,24 @@ class MLAseCalculator(Calculator):
     def load_model(self, model_path, settings_path):
         settings = yaml.safe_load(open(settings_path, "r"))
         activation = get_activation_by_string(settings['model']['activation'])
+        if settings['model']['cutoff_network'] == 'poly':
+            cutoff_network = PolynomialCutoff(cutoff=settings['data']['cutoff'])
+        elif settings['model']['cutoff_network'] == 'cos':
+            cutoff_network = CosineCutoff(cutoff=settings['data']['cutoff'])
         model = NewtonNet(
-            resolution=settings['model']['resolution'],
+            n_basis=settings['model']['resolution'],
             n_features=settings['model']['n_features'],
             activation=activation,
-            n_interactions=settings['model']['n_interactions'],
+            n_layers=settings['model']['n_interactions'],
             dropout=settings['training']['dropout'],
             max_z=10,
             cutoff=settings['data']['cutoff'],  ## data cutoff
-            cutoff_network=settings['model']['cutoff_network'],
+            cutoff_network=cutoff_network,
             normalize_atomic=settings['model']['normalize_atomic'],
             requires_dr=settings['model']['requires_dr'],
             device=self.device[0],
             create_graph=False,
-            shared_interactions=settings['model']['shared_interactions'],
+            share_layers=settings['model']['shared_interactions'],
             return_hessian=self.return_hessian,
             double_update_latent=settings['model']['double_update_latent'],
             layer_norm=settings['model']['layer_norm'],
@@ -185,6 +190,7 @@ class MLAseCalculator(Calculator):
 
         if self.script:
             model = torch.jit.script(model)
+            model.save(model_path[:-4] + '_script.pt')
         if self.trace_n_atoms:
             model = torch.jit.trace(
                 model, (

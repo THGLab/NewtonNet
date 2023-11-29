@@ -15,10 +15,10 @@ class PolynomialCutoff(nn.Module):
     cutoff (float, optional): cutoff radius.
 
     """
-    def __init__(self, cutoff=5.0, p=9):
+    def __init__(self, cutoff=5.0, degree=9):
         super(PolynomialCutoff, self).__init__()
-        self.register_buffer("cutoff", torch.tensor([cutoff], dtype=torch.float))
-        self.register_buffer("p", torch.tensor([p], dtype=torch.float))
+        self.register_buffer('cutoff', torch.tensor([cutoff], dtype=torch.float))
+        self.register_buffer('degree', torch.tensor([degree], dtype=torch.float))
 
     def forward(self, distances):
         """Compute cutoff.
@@ -30,10 +30,13 @@ class PolynomialCutoff(nn.Module):
             torch.Tensor: values of cutoff function.
 
         """
-        d = distances / self.cutoff
+        distances_scaled = distances / self.cutoff
 
         # Compute values of cutoff function
-        cutoffs = 1 - 0.5*(self.p+1)*(self.p+2)*d.pow(self.p) + self.p*(self.p+2)*d.pow(self.p+1) - 0.5*self.p*(self.p+1)*d.pow(self.p+2)
+        cutoffs = 1 \
+            - 0.5 * (self.degree + 1) * (self.degree+2) * distances_scaled.pow(self.degree) \
+            + self.degree * (self.degree + 2) * distances_scaled.pow(self.degree + 1) \
+            - 0.5 * self.degree * (self.degree + 1) * distances_scaled.pow(self.degree + 2)
 
         # Remove contributions beyond the cutoff radius
         cutoffs *= (distances < self.cutoff).float()
@@ -59,7 +62,7 @@ class CosineCutoff(nn.Module):
     """
     def __init__(self, cutoff=5.0):
         super(CosineCutoff, self).__init__()
-        self.register_buffer("cutoff", torch.tensor([cutoff], dtype=torch.float))
+        self.register_buffer('cutoff', torch.tensor([cutoff], dtype=torch.float))
 
     def forward(self, distances):
         """Compute cutoff.
@@ -73,6 +76,8 @@ class CosineCutoff(nn.Module):
         """
         # Compute values of cutoff function
         cutoffs = 0.5 * (torch.cos(distances * np.pi / self.cutoff) + 1.0)
+        
         # Remove contributions beyond the cutoff radius
         cutoffs *= (distances < self.cutoff).float()
+
         return cutoffs
