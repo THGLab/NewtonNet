@@ -7,12 +7,12 @@ import torch
 from torch.optim import Adam
 import yaml
 
-from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.models import NewtonNet
-
 from newtonnet.train import Trainer
 from newtonnet.data import parse_train_test
-from newtonnet.layers.cutoff import CosineCutoff, PolynomialCutoff
+from newtonnet.layers.activations import get_activation_by_string
+from newtonnet.layers.cutoff import get_cutoff_by_string
+from newtonnet.layers.aggregation import get_aggregation_by_string
 # from newtonnet.data import parse_ani_data
 # from newtonnet.data import parse_methane_data
 # from newtonnet.data import parse_t1x_data
@@ -54,10 +54,8 @@ print('normalizer: ', normalizer)
 # model
 # activation function
 activation = get_activation_by_string(settings['model']['activation'])
-if settings['model']['cutoff_network'] == 'poly':
-    cutoff_network = PolynomialCutoff(cutoff=settings['data']['cutoff'])
-elif settings['model']['cutoff_network'] == 'cos':
-    cutoff_network = CosineCutoff(cutoff=settings['data']['cutoff'])
+cutoff_network = get_cutoff_by_string(settings['model']['cutoff_network'], settings['data']['cutoff'])
+aggregation = get_aggregation_by_string(settings['model']['aggregation'])
 
 model = NewtonNet(
     n_basis=settings['model']['resolution'],
@@ -69,7 +67,7 @@ model = NewtonNet(
     cutoff=settings['data']['cutoff'],  ## data cutoff
     cutoff_network=cutoff_network,
     normalizer=normalizer,
-    normalize_atomic=settings['model']['normalize_atomic'],
+    train_normalizer=settings['model']['train_normalizer'],
     requires_dr=settings['model']['requires_dr'],
     device=device[0],
     create_graph=True,
@@ -77,6 +75,7 @@ model = NewtonNet(
     return_hessian=settings['model']['return_hessian'],
     double_update_latent=settings['model']['double_update_latent'],
     layer_norm=settings['model']['layer_norm'],
+    aggregration=aggregation,
     )
 
 # laod pre-trained model

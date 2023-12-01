@@ -5,7 +5,6 @@ import numpy as np
 
 def get_activation_by_string(key):
     if key == "swish":
-        # activation = swish
         activation = nn.SiLU()
     elif key == 'relu':
         activation = nn.ReLU()
@@ -16,22 +15,6 @@ def get_activation_by_string(key):
     else:
         raise NotImplementedError("The activation function '%s' is unknown."%str(key))
     return activation
-
-
-def swish(x):
-    r"""Compute the self-gated Swish activation function.
-
-    .. math::
-       y = x * sigmoid(x)
-
-    Args:
-        x (torch.Tensor): input tensor.
-
-    Returns:
-        torch.Tensor: Swish activation of input.
-
-    """
-    return x * torch.sigmoid(x)
 
 
 def shifted_softplus(x):

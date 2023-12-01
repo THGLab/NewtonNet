@@ -2,6 +2,15 @@ import numpy as np
 import torch
 from torch import nn
 
+def get_cutoff_by_string(key, cutoff=5.0, degree=9):
+    if key == "poly":
+        cutoff = PolynomialCutoff(cutoff=cutoff, degree=degree)
+    elif key == 'cos':
+        cutoff = CosineCutoff(cutoff=cutoff)
+    else:
+        raise NotImplementedError(f'The cutoff function {key} is unknown.')
+    return cutoff
+
 
 class PolynomialCutoff(nn.Module):
     r"""Class of Polynomial cutoff.

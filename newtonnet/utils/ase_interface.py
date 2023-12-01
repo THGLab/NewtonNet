@@ -2,13 +2,14 @@ import numpy as np
 from ase.units import *
 from ase.calculators.calculator import Calculator
 import torch
+from torch.utils.data import DataLoader
 import torch.autograd.functional as F
 import yaml
 
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import CosineCutoff, PolynomialCutoff
 from newtonnet.models import NewtonNet
-from newtonnet.data import MolecularDataset, extensive_train_loader
+from newtonnet.data import MolecularDataset
 
 
 ##-------------------------------------
@@ -78,7 +79,7 @@ class MLAseCalculator(Calculator):
         super().calculate(atoms,properties,system_changes)
         data = self.data_formatter(atoms)
         data = MolecularDataset(data)
-        gen = extensive_train_loader(data, batch_size=len(data), shuffle=False, drop_last=False)
+        gen = DataLoader(dataset=data, batch_size=len(data), shuffle=False, drop_last=False)
         for data in gen:
             data['R'] = data['R'].to(self.device[0])
             data['Z'] = data['Z'].to(self.device[0])
@@ -99,14 +100,14 @@ class MLAseCalculator(Calculator):
                     #energy = self.model(data).detach().cpu().numpy()
                     #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
                     #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
                     energy[model_] = pred['E'].detach().cpu().numpy() * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
                     del pred
             elif self.hess_method=='fwd_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
@@ -118,7 +119,7 @@ class MLAseCalculator(Calculator):
                     del pred
             elif self.hess_method=='cnt_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
@@ -130,7 +131,7 @@ class MLAseCalculator(Calculator):
                     del pred
             elif self.hess_method is None:
                 for model_, model in enumerate(self.models):
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
                     del pred
@@ -173,7 +174,7 @@ class MLAseCalculator(Calculator):
             max_z=10,
             cutoff=settings['data']['cutoff'],  ## data cutoff
             cutoff_network=cutoff_network,
-            normalize_atomic=settings['model']['normalize_atomic'],
+            train_normalizer=settings['model']['train_normalizer'],
             requires_dr=settings['model']['requires_dr'],
             device=self.device[0],
             create_graph=False,

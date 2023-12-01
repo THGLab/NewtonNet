@@ -565,6 +565,7 @@ class Trainer:
 
             # for s in range(steps):
             for s, train_batch in enumerate(train_generator):
+                # print(s, train_batch['E'].max())
                 self.optimizer.zero_grad()
 
                 # train_batch = next(train_generator)
