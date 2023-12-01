@@ -7,8 +7,12 @@ import shutil
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
+import torch
+from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
-from torch import nn
+
+from newtonnet.models.newtonnet import NewtonNet
+from newtonnet.train.loss import EnergyForceLoss
 from newtonnet.utils.utility import standardize_batch
 from itertools import chain
 
@@ -20,19 +24,15 @@ class Trainer:
     """
     def __init__(
             self,
-            model,
-            loss_fn,
-            optimizer,
-            requires_dr,
-            device,
-            yml_path,
-            output_path,
-            script_name,
-            lr_scheduler,
-            energy_loss_w,
-            force_loss_w,
-            loss_wf_decay,
-            lambda_l1,
+            model: nn.Module = None,
+            loss_fn: nn.Module = None,
+            optimizer: optim.Optimizer = None,
+            requires_dr: bool = False,
+            device: torch.device = None,
+            settings_path: str = 'settings.yml',
+            output_path: str = 'output',
+            script_path: str = 'script.py',
+            lr_scheduler: optim.lr_scheduler._LRScheduler = None,
             checkpoint_log=1,
             checkpoint_val=1,
             checkpoint_test=20,
@@ -44,15 +44,12 @@ class Trainer:
             target_name=None,
             force_latent=False,
             ):
-        self.model = model
-        self.loss_fn = loss_fn
-        self.optimizer = optimizer
+        self.model = model or NewtonNet()
+        self.loss_fn = loss_fn or EnergyForceLoss()
+        trainable_params = filter(lambda p: p.requires_grad, self.model.parameters())
+        self.optimizer = optimizer or optim.Adam(trainable_params)
         self.requires_dr = requires_dr
-        self.device = device
-        self.energy_loss_w = energy_loss_w
-        self.force_loss_w = force_loss_w
-        self.wf_lambda = lambda epoch: np.exp(-epoch * loss_wf_decay)
-        self.lambda_l1 = lambda_l1
+        self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         if type(device) is list and len(device) > 1:
             self.multi_gpu = True
@@ -60,17 +57,8 @@ class Trainer:
             self.multi_gpu = False
 
         # outputs
-        self._subdirs(yml_path, output_path, script_name)
-        if training:
-
-            # hooks
-            if hooks:
-                self.hooks = None
-                self._hooks(hooks)
-
-            # learning rate scheduler
-            self._handle_scheduler(lr_scheduler, optimizer)
-            self.lr_scheduler = lr_scheduler
+        self._subdirs(settings_path, output_path, script_path)
+        self.lr_scheduler = lr_scheduler
 
         # checkpoints
         self.check_log = checkpoint_log
@@ -109,21 +97,6 @@ class Trainer:
         self.target_name = target_name
         self.force_latent = force_latent
 
-    def _handle_scheduler(self, lr_scheduler, optimizer):
-
-        if lr_scheduler[0] == 'plateau':
-            self.scheduler = ReduceLROnPlateau(optimizer=optimizer,
-                                               mode='min',
-                                               patience=lr_scheduler[2],
-                                               factor=lr_scheduler[3],
-                                               min_lr=lr_scheduler[4])
-        elif lr_scheduler[0] == 'decay':
-            lambda1 = lambda epoch: np.exp(-epoch * lr_scheduler[1])
-            self.scheduler = LambdaLR(optimizer=optimizer, lr_lambda=lambda1)
-
-        else:
-            raise NotImplemented('scheduler "%s" is not implemented yet.'%lr_scheduler[0])
-
     def _subdirs(self, yml_path, output_path, script_name):
 
         # create output directory and subdirectories
@@ -152,18 +125,6 @@ class Trainer:
         os.makedirs(script_out)
         shutil.copyfile(yml_path, os.path.join(script_out,os.path.basename(yml_path)))
         shutil.copyfile(script_name, os.path.join(script_out,os.path.basename(script_name)))
-
-    def _hooks(self, hooks):
-        hooks_list = []
-        if 'vismolvector3d' in hooks and hooks['vismolvector3d']:
-            from combust.train.hooks import VizMolVectors3D
-
-            vis = VizMolVectors3D()
-            vis.set_output(True, None)
-            hooks_list.append(vis)
-
-        if len(hooks_list) > 0:
-            self.hooks = hooks_list
 
 
     def print_layers(self):
@@ -338,39 +299,15 @@ class Trainer:
         for val_step, val_batch in enumerate(generator):
             # val_batch = next(generator)
 
-            if self.hooks is not None and val_step == len(generator)-1:
-                self.model.return_intermediate = True
-                val_preds = self.model(val_batch)
-
-                hs = val_preds['hs']
-                for iter in range(1,4):
-                    self.hooks[0].run(val_batch['R'][0], val_batch['Z'][0],val_batch['F'][0],
-                                   hs[iter][1][0],hs[iter][2][0])
-                    R_ = val_batch['R'].data.cpu().numpy()
-                    np.save(os.path.join(self.val_out_path, 'hs_%i_R_'%iter), R_)
-                    Z_ = val_batch['Z'].data.cpu().numpy()
-                    np.save(os.path.join(self.val_out_path, 'hs_%i_Z_'%iter), Z_)
-                    if self.force_latent:
-                        F_ = val_batch['F_latent'].data.cpu().numpy()
-                    else:
-                        F_ = val_batch['F'].data.cpu().numpy()
-                    np.save(os.path.join(self.val_out_path, 'hs_%i_F_'%iter), F_)
-                    dF_ = hs[iter][1].data.cpu().numpy()
-                    np.save(os.path.join(self.val_out_path, 'hs_%i_dF_'%iter), dF_)
-                    dR_ = hs[iter][2].data.cpu().numpy()
-                    np.save(os.path.join(self.val_out_path, 'hs_%i_dR_'%iter), dR_)
-
-                # self.model.return_intermediate = False
-            else:
-                val_preds = self.model(
-                    atomic_numbers=val_batch['Z'], 
-                    positions=val_batch['R'], 
-                    atom_mask=val_batch['AM'], 
-                    neighbors=val_batch['N'], 
-                    neighbor_mask=val_batch['NM'],
-                    distances=val_batch['D'],
-                    distance_vectors=val_batch['V'],
-                    )
+            val_preds = self.model(
+                atomic_numbers=val_batch['Z'], 
+                positions=val_batch['R'], 
+                atom_mask=val_batch['AM'], 
+                neighbors=val_batch['N'], 
+                neighbor_mask=val_batch['NM'],
+                distances=val_batch['D'],
+                distance_vectors=val_batch['V'],
+                )
 
             if val_preds['E'].ndim == 3:
                 E = val_batch["E"].unsqueeze(1).repeat(1,val_batch["Z"].shape[1],1)
@@ -546,9 +483,6 @@ class Trainer:
             # record total number of epochs so far
             self.epoch += 1
 
-            # loss force weight decay
-            w_f = self.force_loss_w * self.wf_lambda(self.epoch)
-
             # training
             running_loss = 0.0
             ae_energy = 0.0
@@ -559,18 +493,10 @@ class Trainer:
             self.model.train()
             self.model.requires_dr = self.requires_dr
             self.optimizer.zero_grad()
-            # step_iterator = range(steps)
-            # if not self.verbose:
-            #     step_iterator = tqdm(step_iterator)
 
-            # for s in range(steps):
             for s, train_batch in enumerate(train_generator):
-                # print(s, train_batch['E'].max())
                 self.optimizer.zero_grad()
 
-                # train_batch = next(train_generator)
-                # self.model.module(train_batch)
-                # preds = self.model.forward(train_batch)
                 preds = self.model(
                     atomic_numbers=train_batch['Z'], 
                     positions=train_batch['R'], 
@@ -580,14 +506,11 @@ class Trainer:
                     distances=train_batch['D'],
                     distance_vectors=train_batch['V'],
                     )
-                loss = self.loss_fn(preds, train_batch, self.model.parameters())
+                loss = self.loss_fn(preds, train_batch)
                 loss.backward()
                 if clip_grad>0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
                 self.optimizer.step()
-                # if (s+1)%4==0 or s==steps-1:
-                #     self.optimizer.step()          # if in, comment out the one in the loop
-                #     self.optimizer.zero_grad()     # if in, comment out the one in the loop
 
                 current_loss = loss.detach().item()
                 running_loss += current_loss
@@ -658,8 +581,7 @@ class Trainer:
 
                     outputs = self.validation('valid', val_generator)
                     if self.requires_dr:
-                        val_error = self.energy_loss_w * np.mean(outputs['E_ae']) + \
-                                    self.force_loss_w * np.mean(outputs['F_ae_masked'])
+                        val_error = self.energy_loss_w * np.mean(outputs['E_ae']) + self.force_loss_w * np.mean(outputs['F_ae_masked'])
                     else:
                         val_error = self.energy_loss_w * np.mean(outputs['E_ae'])
 
@@ -732,15 +654,19 @@ class Trainer:
                     # np.save(os.path.join(self.val_out_path, 'test_Ei_epoch%i'%self.epoch), outputs['Ei'])
 
             # learning rate decay
-            if self.lr_scheduler[0] == 'plateau':
-                running_val_loss.append(val_error)
-                if len(running_val_loss) > self.lr_scheduler[1]:
-                    running_val_loss.pop(0)
-                accum_val_loss = np.mean(running_val_loss)
-                self.scheduler.step(accum_val_loss)
-            elif self.lr_scheduler[0] == 'decay':
-                self.scheduler.step()
-                accum_val_loss = 0.0
+            # if self.lr_scheduler[0] == 'plateau':
+            #     running_val_loss.append(val_error)
+            #     if len(running_val_loss) > self.lr_scheduler[1]:
+            #         running_val_loss.pop(0)
+            #     accum_val_loss = np.mean(running_val_loss)
+            #     self.scheduler.step(accum_val_loss)
+            # elif self.lr_scheduler[0] == 'decay':
+            #     self.scheduler.step()
+            #     accum_val_loss = 0.0
+            self.lr_scheduler.step(val_error)
+
+            # loss force weight decay
+            self.loss_fn.force_loss_decay()
 
             # checkpoint
             if self.epoch % self.check_log == 0:
