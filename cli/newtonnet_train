@@ -2,17 +2,19 @@
 
 import os
 import argparse
+import yaml
 
 import torch
 from torch.optim import Adam
-import yaml
+from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 
 from newtonnet.models import NewtonNet
-from newtonnet.train import Trainer
+from newtonnet.train import Trainer, EnergyForceLoss
 from newtonnet.data import parse_train_test
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.layers.aggregation import get_aggregation_by_string
+from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
 # from newtonnet.data import parse_ani_data
 # from newtonnet.data import parse_methane_data
 # from newtonnet.data import parse_t1x_data
@@ -36,9 +38,12 @@ parser.add_argument(
 args = parser.parse_args()
 config = args.config
 
-# settings
+# locate files
 settings_path = config
-settings = yaml.safe_load(open(settings_path, "r"))
+settings = yaml.safe_load(open(settings_path, 'r'))
+settings_path = os.path.abspath(settings_path)
+script_path = os.path.abspath(__file__)
+output_path = settings['general']['output']
 
 # device
 if type(settings['general']['device']) is list:
@@ -85,80 +90,37 @@ if settings['model']['pre_trained']:
 
 # optimizer
 trainable_params = filter(lambda p: p.requires_grad, model.parameters())
-optimizer = Adam(
+optimizer = get_optimizer_by_string(
+    settings['training'].get('optimizer', 'adam'),
     trainable_params,
-    lr=settings['training']['lr'],
-    weight_decay=settings['training']['weight_decay'],
+    **settings['training'].get('optimizer_kwargs', {}),
+    )
+lr_scheduler = get_scheduler_by_string(
+    settings['training'].get('lr_scheduler', 'plateau'),
+    optimizer,
+    **settings['training'].get('lr_scheduler_kwargs', {}),
     )
 
 # loss
-w_energy = settings['model']['w_energy']
-w_force = settings['model']['w_force']
-w_f_mag = settings['model']['w_f_mag']
-w_f_dir = settings['model']['w_f_dir']
-lambda_l1 = settings['model']['lambda_l1']
-
-def custom_loss(preds, batch_data, params):
-
-    # compute the mean squared error on the energies
-    if w_energy > 0:
-        diff_energy = preds['E'] - batch_data["E"]
-        assert diff_energy.shape[1] == 1
-        err_sq_energy = torch.mean(diff_energy**2)
-        err_sq = w_energy * err_sq_energy
-
-    # compute the mean squared error on the forces
-    if w_force > 0:
-        diff_forces = preds['F'] - batch_data["F"]
-        err_sq_forces = torch.mean(diff_forces**2)
-        err_sq = err_sq + w_force * err_sq_forces
-
-    # compute the mean square error on the force magnitudes
-    if w_f_mag > 0:
-        diff_forces = torch.norm(preds['F'], p=2, dim=-1) - torch.norm(batch_data["F"], p=2, dim=-1)
-        err_sq_mag_forces = torch.mean(diff_forces ** 2)
-        err_sq = err_sq + w_f_mag * err_sq_mag_forces
-
-    if w_f_dir > 0:
-        cos = torch.nn.CosineSimilarity(dim=-1, eps=1e-6)
-        direction_diff = 1 - cos(preds['F_latent'], batch_data["F"])
-        # direction_diff = direction_diff * torch.norm(batch_data["F"], p=2, dim=-1)
-        direction_loss = torch.mean(direction_diff)
-        err_sq = err_sq + w_f_dir * direction_loss
-    
-    if lambda_l1 > 0:
-        for param in params:
-            err_sq = err_sq + lambda_l1 * param.norm(1)
-
-    if settings['checkpoint']['verbose']:
-        print('\n',
-              ' '*8, 'energy loss: ', err_sq_energy.detach().cpu().numpy(), '\n')
-        print(' '*8, 'force loss: ', err_sq_forces.detach().cpu().numpy(), '\n')
-
-        if w_f_mag>0:
-            print(' '*8, 'force mag loss: ', err_sq_mag_forces, '\n')
-
-        if w_f_dir>0:
-            print(' '*8, 'direction loss: ', direction_loss.detach().cpu().numpy())
-
-    return err_sq
-
+loss_fn = EnergyForceLoss(
+    w_energy=settings['model']['w_energy'],
+    w_force=settings['model']['w_force'],
+    w_f_mag=settings['model']['w_f_mag'],
+    w_f_dir=settings['model']['w_f_dir'],
+    wf_decay=settings['model']['wf_decay'],
+    )
 
 # training
 trainer = Trainer(
     model=model,
-    loss_fn=custom_loss,
+    loss_fn=loss_fn,
     optimizer=optimizer,
     requires_dr=settings['model']['requires_dr'],
     device=device,
-    yml_path=settings['general']['me'],
-    output_path=settings['general']['output'],
-    script_name=settings['general']['driver'],
-    lr_scheduler=settings['training']['lr_scheduler'],
-    energy_loss_w= w_energy,
-    force_loss_w=w_force,
-    loss_wf_decay=settings['model']['wf_decay'],
-    lambda_l1=lambda_l1,
+    settings_path=settings_path,
+    output_path=output_path,
+    script_path=script_path,
+    lr_scheduler=lr_scheduler,
     checkpoint_log=settings['checkpoint']['log'],
     checkpoint_val=settings['checkpoint']['val'],
     checkpoint_test=settings['checkpoint']['test'],
