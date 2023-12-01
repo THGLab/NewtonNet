@@ -2,48 +2,10 @@ import torch
 from torch import nn
 
 
-class ScaleShift(nn.Module):
-    r"""Scale and shift layer for standardization.
-
-    Credit : https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py under the MIT License.
-
-    .. math::
-       y = x \times \sigma + \mu
-
-    Parameters
-    ----------
-    mean: torch.Tensor
-        mean value :math:`\mu`.
-
-    stddev: torch.Tensor
-        standard deviation value :math:`\sigma`.
-
-    Copyright: https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py
-    """
-    def __init__(self, mean, stddev):
-        super(ScaleShift, self).__init__()
-        self.register_buffer("mean", mean)
-        self.register_buffer("stddev", stddev)
-
-    def forward(self, input):
-        """Compute layer output.
-
-        Parameters
-        ----------
-        input: torch.Tensor
-            input data.
-
-        Returns
-        -------
-        torch.Tensor: layer output.
-
-        """
-        y = input * self.stddev + self.mean
-        return y
-
-
 class TrainableScaleShift(nn.Module):
     r"""Trainable scale and shift layer for standardization. Each atom type uses its dedicated scale and shift values
+
+    Credit : https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py under the MIT License.
 
     .. math::
        y = x \times \sigma + \mu
@@ -57,22 +19,24 @@ class TrainableScaleShift(nn.Module):
     stddev: torch.Tensor
         standard deviation value :math:`\sigma`.
 
+    Copyright: https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py
+
     """
-    def __init__(self, max_z, initial_mean=None, initial_stddev=None):
+    def __init__(self, max_z, mean=0.0, stddev=1.0, trainable=True):
+
         super(TrainableScaleShift, self).__init__()
-        if initial_mean is not None:
-            mean = nn.Parameter(torch.zeros(max_z) + initial_mean, requires_grad=True)
-        else:
-            mean = nn.Parameter(torch.zeros(max_z), requires_grad=True)
-        if initial_stddev is not None:
-            stddev = nn.Parameter(torch.ones(max_z) * initial_stddev, requires_grad=True)
-        else:
-            stddev = nn.Parameter(torch.ones(max_z), requires_grad=True)
-        self.register_parameter('mean', mean)
-        self.register_parameter('stddev', stddev)
+
+        self.mean = nn.Parameter(torch.tensor([mean] * max_z, dtype=torch.float), requires_grad=trainable)
+        self.stddev = nn.Parameter(torch.tensor([stddev] * max_z, dtype=torch.float), requires_grad=trainable)
+        # self.mean = nn.Embedding(max_z, 1)
+        # self.mean.weight.data.fill_(mean)
+        # self.mean.weight.requires_grad = trainable
+        # self.stddev = nn.Embedding(max_z, 1)
+        # self.stddev.weight.data.fill_(stddev)
+        # self.stddev.weight.requires_grad = trainable
 
 
-    def forward(self, input_energies, z):
+    def forward(self, inputs, atomic_numbers):
         """Compute layer output.
 
         Parameters
@@ -88,7 +52,15 @@ class TrainableScaleShift(nn.Module):
         torch.Tensor: layer output.
 
         """
-        selected_mean = self.mean[z][...,None]
-        selected_stddev = self.stddev[z][...,None]
-        y = input_energies * selected_stddev + selected_mean
+        dim = inputs.dim()
+
+        if dim == 2:    # inputs in batch_size, 1
+            selected_mean = self.mean[atomic_numbers]
+            selected_stddev = self.stddev[atomic_numbers]
+        elif dim == 3:  # inputs in batch_size, n_atoms, 1
+            selected_mean = self.mean[atomic_numbers][:, :, None]
+            selected_stddev = self.stddev[atomic_numbers][:, :, None]
+        else:
+            raise ValueError(f'inputs dimension {dim} is not supported')
+        y = inputs * selected_stddev + selected_mean
         return y
