@@ -27,7 +27,6 @@ def get_loss_by_string(**kwargs):
         if kwargs.get('w_f_dir', 0.0) > 0.0:
             main_losses.append(VectorCosLoss('F', mode='mse', masked=False, weight=kwargs['w_f_dir']))
         main_loss = MultitaskLoss(mode=mode, loss_fns=main_losses, sum=True)
-        print(main_losses)
 
         eval_losses = []
         eval_losses.append(ScalarLoss('E', mode='mae', masked=False, weight=1.0))
