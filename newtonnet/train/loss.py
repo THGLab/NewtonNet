@@ -1,51 +1,130 @@
 import torch
 import torch.nn as nn
 
-class EnergyForceLoss(nn.Module):
+def get_loss_by_string(**kwargs):
+    '''
+    mode: str
+        mode of the loss function
+    kwargs: dict
+        keyword arguments for the loss function
+
+    Returns
+    -------
+    main_loss: nn.Module
+        main loss function for model training (back propagation) and validation (learning rate scheduling)
+    eval_loss: nn.Module
+        evaluation loss function for task-specific model evaluation
+    '''
+    mode = kwargs.get('mode', 'energy/force')
+    if mode == 'energy/force':
+        main_losses = []
+        if kwargs.get('w_energy', 0.0) > 0.0:
+            main_losses.append(ScalarLoss('E', mode='mse', masked=False, weight=kwargs['w_energy']))
+        if kwargs.get('w_force', 0.0) > 0.0:
+            main_losses.append(VectorLoss('F', mode='mse', masked=False, weight=kwargs['w_force']))
+        if kwargs.get('w_f_mag', 0.0) > 0.0:
+            main_losses.append(VectorNormLoss('F', mode='mse', masked=False, weight=kwargs['w_f_mag']))
+        if kwargs.get('w_f_dir', 0.0) > 0.0:
+            main_losses.append(VectorCosLoss('F', mode='mse', masked=False, weight=kwargs['w_f_dir']))
+        main_loss = MultitaskLoss(mode=mode, loss_fns=main_losses, sum=True)
+        print(main_losses)
+
+        eval_losses = []
+        eval_losses.append(ScalarLoss('E', mode='mae', masked=False, weight=1.0))
+        eval_losses.append(VectorLoss('F', mode='mae', masked=True, weight=1.0))
+        eval_loss = MultitaskLoss(mode=mode, loss_fns=eval_losses, sum=False)
+    else:
+        raise ValueError(f'loss {mode} not implemented')
+    
+    return main_loss, eval_loss
+
+
+class BaseLoss(nn.Module):
     def __init__(
             self, 
-            w_energy: float = 1.0,
-            w_force: float = 0.0,
-            w_f_mag: float = 0.0,
-            w_f_dir: float = 0.0,
-            wf_decay: float = 0.0,
+            key: str, 
+            mode: str = 'mse',
+            masked: bool = False,
+            weight: float = 1.0,
             ):
-        super(EnergyForceLoss, self).__init__()
-        self.w_energy = w_energy
-        self.w_force = w_force
-        self.w_f_mag = w_f_mag
-        self.w_f_dir = w_f_dir
-        self.wf_decay = torch.tensor(wf_decay, dtype=torch.float)
+        super(BaseLoss, self).__init__()
+        self.key = key
+        if mode == 'mse':
+            self.loss_fn = nn.MSELoss()
+        elif mode == 'mae':
+            self.loss_fn = nn.L1Loss()
+        else:
+            raise ValueError(f'loss mode {mode} not implemented')
+        self.masked = masked
+        self.weight = weight
 
-    def forward(self, preds, batch_data):
+    def forward(self, pred, data):
+        raise NotImplementedError('forward method not implemented')
 
-        # compute the mean squared error on the energies
-        if self.w_energy > 0:
-            diff_energy = preds['E'] - batch_data['E']
-            err_sq_energy = torch.mean(diff_energy ** 2)
-            err_sq = self.w_energy * err_sq_energy
+class ScalarLoss(BaseLoss):
+    def __init__(self, key, mode, masked, weight):
+        super(ScalarLoss, self).__init__(key, mode, masked, weight)
+        self.name = f'{key}_{mode}'
 
-        # compute the mean squared error on the forces
-        if self.w_force > 0:
-            diff_forces = preds['F'] - batch_data['F']
-            err_sq_forces = torch.mean(diff_forces ** 2)
-            err_sq = err_sq + self.w_force * err_sq_forces
+    def forward(self, pred, data):
+        if self.masked:
+            loss = self.loss_fn(pred[self.key] * data['AM'], data[self.key] * data['AM']) * data['AM'].numel() / data['AM'].sum()
+            return self.weight * loss
+        else:
+            loss = self.loss_fn(pred[self.key], data[self.key])
+            return self.weight * loss
+        
+class VectorLoss(BaseLoss):
+    def __init__(self, key, mode, masked, weight):
+        super(VectorLoss, self).__init__(key, mode, masked, weight)
+        self.name = f'{key}_{mode}'
 
-        # compute the mean square error on the force magnitudes
-        if self.w_f_mag > 0:
-            diff_forces = torch.norm(preds['F'], p=2, dim=-1) - torch.norm(batch_data['F'], p=2, dim=-1)
-            err_sq_mag_forces = torch.mean(diff_forces ** 2)
-            err_sq = err_sq + self.w_f_mag * err_sq_mag_forces
-
-        # compute the mean square error on the hidden force directions
-        if self.w_f_dir > 0:
-            cos = torch.nn.CosineSimilarity(dim=-1, eps=1e-6)
-            direction_diff = 1 - cos(preds['F_latent'], batch_data['F'])
-            # direction_diff = direction_diff * torch.norm(batch_data["F"], p=2, dim=-1)
-            direction_loss = torch.mean(direction_diff)
-            err_sq = err_sq + self.w_f_dir * direction_loss
-
-        return err_sq
+    def forward(self, pred, data):
+        if self.masked:
+            loss = self.loss_fn(pred[self.key] * data['AM'][:, :, None], data[self.key] * data['AM'][:, :, None]) * data['AM'].numel() / data['AM'].sum()
+            return self.weight * loss
+        else:
+            loss = self.loss_fn(pred[self.key], data[self.key])
+            return self.weight * loss
     
-    def force_loss_decay(self):
-        self.w_force = self.w_force * torch.exp(-self.wf_decay)
+class VectorNormLoss(BaseLoss):
+    def __init__(self, key, mode, masked, weight):
+        super(VectorNormLoss, self).__init__(key, mode, masked, weight)
+        self.name = f'{key}_norm_{mode}'
+
+    def forward(self, pred, data):
+        if self.masked:
+            loss = self.loss_fn(pred[self.key].norm(dim=-1) * data['AM'], data[self.key].norm(dim=-1) * data['AM']) * data['AM'].numel() / data['AM'].sum()
+            return self.weight * loss
+        else:
+            loss = self.loss_fn(pred[self.key], data[self.key])
+            return self.weight * loss
+    
+class VectorCosLoss(BaseLoss):
+    def __init__(self, key, mode, masked, weight):
+        super(VectorCosLoss, self).__init__(key, mode, masked, weight)
+        self.cos = nn.CosineSimilarity(dim=-1)
+        self.name = f'{key}_cos_{mode}'
+
+    def forward(self, pred, data):
+        n_data, n_atoms, _ = data[self.key].shape
+        if self.masked:
+            loss = self.loss_fn(self.cos(pred[self.key], data[self.key]) * data['AM'], torch.ones(n_data, n_atoms, dtype=torch.float, device=pred[self.key].device)) * data['AM'].numel() / data['AM'].sum()
+            return self.weight * loss
+        else:
+            loss = self.loss_fn(self.cos(pred[self.key], data[self.key]), torch.ones(n_data, n_atoms, dtype=torch.float, device=pred[self.key].device))
+            return self.weight * loss
+
+
+class MultitaskLoss(nn.Module):
+    def __init__(self, mode: str, loss_fns: list, sum: bool = True):
+        super(MultitaskLoss, self).__init__()
+        self.mode = mode
+        self.loss_fns = loss_fns
+        self.sum = sum
+
+    def forward(self, pred, data):
+        if self.sum:
+            return sum([loss_fn(pred, data) for loss_fn in self.loss_fns])
+        else:
+            return {loss_fn.name: loss_fn(pred, data) for loss_fn in self.loss_fns}
