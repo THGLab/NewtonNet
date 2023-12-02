@@ -1,10 +1,10 @@
 import os
-import numpy as np
 import pandas as pd
 import torch
 import time
 import shutil
 import matplotlib.pyplot as plt
+import seaborn as sns
 from tqdm import tqdm
 
 import torch
@@ -13,8 +13,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from newtonnet.models.newtonnet import NewtonNet
 from newtonnet.train.loss import get_loss_by_string
-from newtonnet.utils.utility import standardize_batch
-from itertools import chain
 
 
 class Trainer:
@@ -64,10 +62,7 @@ class Trainer:
         self.check_model = checkpoint_model
 
         # checkpoints
-        self.mode = self.main_loss.mode
         self.best_val_loss = torch.inf
-        self.target_name = target_name
-        self.force_latent = force_latent
         self.log = pd.DataFrame()
         self.log['epoch'] = None
         for phase in ('train', 'val', 'test'):
@@ -78,7 +73,6 @@ class Trainer:
         self.log['time'] = None
 
     def make_subdirs(self, output_base_path, script_path, settings_path):
-
         # create output directory
         path_iter = 1
         output_path = os.path.join(output_base_path, f'training_{path_iter}')
@@ -108,36 +102,43 @@ class Trainer:
         print(f'total trainable parameters: {sum(p.numel() for p in self.model.parameters() if p.requires_grad)}')
         print()
 
-    def plot_grad_flow(self):
-        ave_grads = []
+    def plot_grad_flow(self, epoch):
+        grads = []
         layers = []
-        for n, p in self.model.named_parameters():
-            if (p.requires_grad) and ("bias" not in n):
-                # shorten names
-                layer_name = n.split('.')
-                layer_name = [l[:3] for l in layer_name]
-                layer_name = '.'.join(layer_name[:-1])
-                layers.append(layer_name)
-                # print(layer_name, p.grad)
-                if p.grad is not None:
-                    ave_grads.append(p.grad.abs().mean().detach().cpu())
-                else:
-                    ave_grads.append(0)
+        for name, parameter in self.model.named_parameters():
+            if not parameter.requires_grad:
+                continue
+            # shorten names
+            name = name.replace('node_embedding', 'emb')
+            name = name.replace('message_passing_layers', 'mes')
+            name = name.replace('invariant', 'inv')
+            name = name.replace('equivariant', 'eq')
+            name = name.replace('message', 'mes')
+            name = name.replace('coefficient', 'coeff')
+            name = name.replace('feature', 'feat')
+            name = name.replace('selfupdate', 'upd')
+            name = name.replace('property', 'prop')
+            name = name.replace('prediction', 'pred')
+            name = name.replace('weight', 'w')
+            name = name.replace('bias', 'b')
+            name = name.replace('mean', 'm')
+            name = name.replace('stddev', 's')
+            layers.append(name)
+            grads.append(parameter.grad.detach().abs().cpu().numpy().flatten())
 
-        fig, ax = plt.subplots(1, 1)
-        ax.plot(ave_grads, alpha=0.3, color="b")
-        ax.hlines(0, 0, len(ave_grads) + 1, linewidth=1, color="k")
-        plt.xticks(range(0, len(ave_grads), 1), layers, rotation="vertical")
-        plt.xlim(xmin=0, xmax=len(ave_grads))
-        plt.xlabel("Layers")
-        plt.ylabel("average gradient")
-        plt.title("Gradient flow: epoch#%i" %self.epoch)
+        fig, ax = plt.subplots(figsize=(16, 3))
+        sns.stripplot(grads, color='tab:blue', ax=ax)
+        plt.xticks(range(0, len(grads), 1), layers, rotation='vertical')
+        plt.xlim(xmin=0, xmax=len(grads))
+        plt.yscale('log')
+        plt.xlabel('Layers')
+        plt.ylabel('Gradients')
+        plt.title(f'Gradient flow - Epoch {epoch}')
         plt.grid(True)
-        ax.set_axisbelow(True)
 
-        file_name= os.path.join(self.graph_path,"avg_grad.png")
-        plt.savefig(file_name, dpi=300,bbox_inches='tight')
-        plt.close(fig)
+        file_name = os.path.join(self.graph_path, f'grad_flow_{epoch}.png')
+        plt.savefig(file_name, dpi=300, bbox_inches='tight')
+        plt.close()
 
     def resume_model(self, path):
         checkpoint = torch.load(path)
@@ -314,6 +315,7 @@ class Trainer:
 
             # checkpoint
             if epoch % self.check_log == 0:
+                self.plot_grad_flow(epoch)
                 checkpoint = {}
                 checkpoint.update({'epoch': epoch})
                 checkpoint.update({f'train_{key}': value for key, value in train_losses.items()})

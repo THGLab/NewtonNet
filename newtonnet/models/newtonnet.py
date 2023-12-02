@@ -310,7 +310,8 @@ class MessagePassingLayer(nn.Module):
         self.double_update_latent = double_update_latent
 
         self.layer_norm = layer_norm
-        self.norm = nn.LayerNorm(n_features)
+        if self.layer_norm:
+            self.norm = nn.LayerNorm(n_features)
 
     def gather_neighbors(self, inputs, neighbors):
         n_features = inputs.shape[-1]
