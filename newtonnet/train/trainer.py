@@ -4,7 +4,6 @@ import torch
 import time
 import shutil
 import matplotlib.pyplot as plt
-import seaborn as sns
 from tqdm import tqdm
 
 import torch
@@ -124,20 +123,18 @@ class Trainer:
             name = name.replace('mean', 'm')
             name = name.replace('stddev', 's')
             layers.append(name)
-            grads.append(parameter.grad.detach().abs().cpu().numpy().flatten())
+            grads.append(parameter.grad.detach().abs().mean().cpu())
 
-        fig, ax = plt.subplots(figsize=(16, 3))
-        sns.stripplot(grads, color='tab:blue', ax=ax)
-        plt.xticks(range(0, len(grads), 1), layers, rotation='vertical')
-        plt.xlim(xmin=0, xmax=len(grads))
+        plt.figure(figsize=(16, 3))
+        plt.plot(grads, '-', color='tab:blue')
+        plt.xticks(range(len(layers)), layers, rotation='vertical')
+        plt.xlim(-1, len(layers))
         plt.yscale('log')
         plt.xlabel('Layers')
-        plt.ylabel('Gradients')
+        plt.ylabel('Average gradients')
         plt.title(f'Gradient flow - Epoch {epoch}')
         plt.grid(True)
-
-        file_name = os.path.join(self.graph_path, f'grad_flow_{epoch}.png')
-        plt.savefig(file_name, dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(self.graph_path, f'grad_flow_{epoch}.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
     def resume_model(self, path):
