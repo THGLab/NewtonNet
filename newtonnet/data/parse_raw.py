@@ -1,5 +1,5 @@
 import numpy as np
-
+import torch
 from torch.utils.data import random_split
 from torch.utils.data import DataLoader
 from newtonnet.data import MolecularDataset
@@ -16,7 +16,7 @@ def split(data, data_sizes):
 
     return train_data, val_data, test_data
 
-def parse_train_test(settings, device):
+def parse_train_test(settings, device: torch.device = torch.device('cpu')):
     """
     Implementation based on pre-splitted training, validation, and test data.
 
@@ -57,42 +57,44 @@ def parse_train_test(settings, device):
     train_size = settings['data'].get('train_size', -1)
     val_size = settings['data'].get('val_size', -1)
     test_size = settings['data'].get('test_size', -1)
+    print('Data:')
     if train_path == val_path == test_path:
-        print('Use training data for validation and test.')
-        data = MolecularDataset(np.load(train_path), environment=environment)
+        print('use training data for validation and test')
+        data = MolecularDataset(np.load(train_path), environment=environment, device=device)
         train_data, val_data, test_data = split(data, (train_size, val_size, test_size))
     elif train_path == val_path:
-        print('Use training data for validation.')
-        data = MolecularDataset(np.load(train_path), environment=environment)
+        print('use training data for validation')
+        data = MolecularDataset(np.load(train_path), environment=environment, device=device)
         train_data, val_data = split(data, (train_size, val_size, 0))
-        data = MolecularDataset(np.load(test_path), environment=environment)
+        data = MolecularDataset(np.load(test_path), environment=environment, device=device)
         _, _, test_data = split(data, (0, 0, test_size))
     elif train_path == test_path:
-        print('Use training data for test.')
-        data = MolecularDataset(np.load(train_path), environment=environment)
+        print('use training data for test')
+        data = MolecularDataset(np.load(train_path), environment=environment, device=device)
         train_data, _, test_data = split(data, (train_size, 0, test_size))
-        data = MolecularDataset(np.load(val_path), environment=environment)
+        data = MolecularDataset(np.load(val_path), environment=environment, device=device)
         _, val_data, _ = split(data, (0, val_size, 0))
     elif val_path == test_path:
-        print('Use validation data for test.')
-        data = MolecularDataset(np.load(train_path), environment=environment)
+        print('use validation data for test')
+        data = MolecularDataset(np.load(train_path), environment=environment, device=device)
         train_data, _, _, = split(data, (train_size, 0, 0))
-        data = MolecularDataset(np.load(val_path), environment=environment)
+        data = MolecularDataset(np.load(val_path), environment=environment, device=device)
         _, val_data, test_data = split(data, (0, val_size, test_size))
     else:
-        print('Use separate training, validation, and test data.')
-        data = MolecularDataset(np.load(train_path), environment=environment)
+        print('use separate training, validation, and test data')
+        data = MolecularDataset(np.load(train_path), environment=environment, device=device)
         train_data, _, _ = split(data, (train_size, 0, 0))
-        data = MolecularDataset(np.load(val_path), environment=environment)
+        data = MolecularDataset(np.load(val_path), environment=environment, device=device)
         _, val_data, _ = split(data, (0, val_size, 0))
-        data = MolecularDataset(np.load(test_path), environment=environment)
+        data = MolecularDataset(np.load(test_path), environment=environment, device=device)
         _, _, test_data = split(data, (0, 0, test_size))
+    print(f'data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
 
     # extract data stats
     train_E = train_data.dataset.E[train_data.indices]
     normalizer = (train_E.mean(), train_E.std())
-
-    print(f'data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
+    print('normalizer: ', normalizer)
+    print()
 
     train_batch_size = settings['training'].get('train_batch_size', 32)
     val_batch_size = settings['training'].get('val_batch_size', 32)
@@ -101,22 +103,19 @@ def parse_train_test(settings, device):
     train_gen = DataLoader(
         dataset=train_data,
         batch_size=train_batch_size,
-        shuffle=settings['training']['shuffle'],
-        drop_last=settings['training']['drop_last'],
+        shuffle=True,
         )
 
     val_gen = DataLoader(
         dataset=val_data,
         batch_size=val_batch_size,
-        shuffle=settings['training']['shuffle'],
-        drop_last=settings['training']['drop_last'],
+        shuffle=False,
         )
 
     test_gen = DataLoader(
         dataset=test_data,
         batch_size=test_batch_size,
         shuffle=False,
-        drop_last=False,
         )
 
     return train_gen, val_gen, test_gen, normalizer

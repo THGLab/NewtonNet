@@ -9,11 +9,12 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 
 from newtonnet.models import NewtonNet
-from newtonnet.train import Trainer, EnergyForceLoss
+from newtonnet.train import Trainer
 from newtonnet.data import parse_train_test
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.layers.aggregation import get_aggregation_by_string
+from newtonnet.train.loss import get_loss_by_string
 from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
 # from newtonnet.data import parse_ani_data
 # from newtonnet.data import parse_methane_data
@@ -39,11 +40,10 @@ args = parser.parse_args()
 config = args.config
 
 # locate files
-settings_path = config
+settings_path = os.path.abspath(config)
 settings = yaml.safe_load(open(settings_path, 'r'))
-settings_path = os.path.abspath(settings_path)
 script_path = os.path.abspath(__file__)
-output_path = settings['general']['output']
+output_base_path = settings['general']['output']
 
 # device
 if type(settings['general']['device']) is list:
@@ -54,7 +54,6 @@ else:
 # data
 torch.manual_seed(settings['data'].get('random_states', 42))
 train_gen, val_gen, test_gen, normalizer = parse_train_test(settings, device[0])
-print('normalizer: ', normalizer)
 
 # model
 # activation function
@@ -102,32 +101,26 @@ lr_scheduler = get_scheduler_by_string(
     )
 
 # loss
-loss_fn = EnergyForceLoss(
-    w_energy=settings['model']['w_energy'],
-    w_force=settings['model']['w_force'],
-    w_f_mag=settings['model']['w_f_mag'],
-    w_f_dir=settings['model']['w_f_dir'],
-    wf_decay=settings['model']['wf_decay'],
+main_loss, eval_loss = get_loss_by_string(
+    **settings['training'].get('loss_kwargs', {}),
     )
 
 # training
 trainer = Trainer(
     model=model,
-    loss_fn=loss_fn,
+    loss_fns=(main_loss, eval_loss),
     optimizer=optimizer,
     requires_dr=settings['model']['requires_dr'],
     device=device,
-    settings_path=settings_path,
-    output_path=output_path,
+    output_base_path=output_base_path,
     script_path=script_path,
+    settings_path=settings_path,
     lr_scheduler=lr_scheduler,
     checkpoint_log=settings['checkpoint']['log'],
     checkpoint_val=settings['checkpoint']['val'],
     checkpoint_test=settings['checkpoint']['test'],
     checkpoint_model=settings['checkpoint']['model'],
     verbose=settings['checkpoint']['verbose'],
-    hooks=settings['hooks'],
-    mode=settings['data']['mode'],
     )
 
 # trainer.print_layers()
@@ -136,14 +129,9 @@ trainer = Trainer(
 
 trainer.train(
     train_generator=train_gen,
-    epochs=settings['training']['epochs'],
-    # steps=tr_steps,
     val_generator=val_gen,
-    # val_steps=val_steps,
-    irc_generator=None,
-    irc_steps=None,
     test_generator=test_gen,
-    # test_steps=test_steps,
+    epochs=settings['training']['epochs'],
     clip_grad=settings['training']['clip_grad'],
     )
 

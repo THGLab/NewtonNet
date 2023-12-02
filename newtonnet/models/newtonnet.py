@@ -102,7 +102,7 @@ class NewtonNet(nn.Module):
 
         # atomic embedding
         self.n_features = n_features
-        self.node_embedding = nn.Embedding(max_z, n_features, padding_idx=0)
+        self.node_embedding = nn.Embedding(max_z, n_features, padding_idx=0, device=device)
 
         # edge embedding
         shell_cutoff = cutoff
