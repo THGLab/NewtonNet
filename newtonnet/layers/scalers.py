@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 
-class ScaleShift(nn.Module):
+class Normalizer(nn.Module):
     r"""Trainable scale and shift layer for standardization. Each atom type uses its dedicated scale and shift values
 
     Credit : https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py under the MIT License.
@@ -22,12 +22,17 @@ class ScaleShift(nn.Module):
     Copyright: https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py
 
     """
-    def __init__(self, max_z, mean=0.0, stddev=1.0, trainable=True):
-
-        super(ScaleShift, self).__init__()
-
-        self.mean = nn.Parameter(torch.tensor([mean] * max_z, dtype=torch.float), requires_grad=trainable)
-        self.std = nn.Parameter(torch.tensor([stddev] * max_z, dtype=torch.float), requires_grad=trainable)
+    def __init__(self, data=None, atomic_numbers=None, trainable=False):
+        super(Normalizer, self).__init__()
+        if data.dim() == 2:    # graph property  # inputs in data_size, _
+            mean = data.mean()
+            std = data.std()
+        elif data.dim() == 3:    # node property  # inputs in data_size, n_atoms, _
+            max_z = atomic_numbers.max()
+            mean = torch.tensor([data[atomic_numbers == z].mean() for z in range(max_z + 1)])
+            std = torch.tensor([data[atomic_numbers == z].std() for z in range(max_z + 1)])
+        self.mean = nn.Parameter(mean, requires_grad=trainable)
+        self.std = nn.Parameter(std, requires_grad=trainable)
 
 
     def forward(self, inputs, atomic_numbers, scale=True, shift=True):
@@ -47,49 +52,41 @@ class ScaleShift(nn.Module):
 
         """
         dim = inputs.dim()
-        if dim == 2:    # inputs in batch_size, 1
-            selected_mean = self.mean[atomic_numbers]
-            selected_std = self.std[atomic_numbers]
-        elif dim == 3:  # inputs in batch_size, n_atoms, 1
+        if dim == 2:    # graph property  # inputs in data_size, _
+            selected_mean = self.mean
+            selected_std = self.std
+        elif dim == 3:  # node property  # inputs in data_size, n_atoms, _
             selected_mean = self.mean[atomic_numbers][:, :, None]
             selected_std = self.std[atomic_numbers][:, :, None]
         else:
             raise ValueError(f'inputs dimension {dim} is not supported')
-        outputs = inputs
-        if shift:
-            outputs = outputs - selected_mean
-        if scale:
-            outputs = outputs / selected_std
+        outputs = (inputs - selected_mean) / selected_std
         return outputs
     
-    def reverse(self, inputs, atomic_numbers, scale=True, shift=True):
-        """Compute layer output.
+    # def reverse(self, inputs, atomic_numbers):
+    #     """Compute layer output.
 
-        Parameters
-        ----------
-        input_energies: torch.Tensor
-            input atomic energies.
+    #     Parameters
+    #     ----------
+    #     input_energies: torch.Tensor
+    #         input atomic energies.
 
-        z: torch.Tensor
-            input atomic numbers
+    #     z: torch.Tensor
+    #         input atomic numbers
 
-        Returns
-        -------
-        torch.Tensor: layer output.
+    #     Returns
+    #     -------
+    #     torch.Tensor: layer output.
 
-        """
-        dim = inputs.dim()
-        if dim == 2:    # inputs in batch_size, 1
-            selected_mean = self.mean[atomic_numbers]
-            selected_stddev = self.std[atomic_numbers]
-        elif dim == 3:
-            selected_mean = self.mean[atomic_numbers][:, :, None]
-            selected_stddev = self.std[atomic_numbers][:, :, None]
-        else:
-            raise ValueError(f'inputs dimension {dim} is not supported')
-        outputs = inputs
-        if scale:
-            outputs = outputs * selected_stddev
-        if shift:
-            outputs = outputs + selected_mean
-        return outputs
+    #     """
+    #     dim = inputs.dim()
+    #     if dim == 2:    # graph property  # inputs in data_size, _
+    #         selected_mean = self.mean
+    #         selected_stddev = self.std
+    #     elif dim == 3:    # node property  # inputs in data_size, n_atoms, _
+    #         selected_mean = self.mean[atomic_numbers][:, :, None]
+    #         selected_stddev = self.std[atomic_numbers][:, :, None]
+    #     else:
+    #         raise ValueError(f'inputs dimension {dim} is not supported')
+    #     outputs = inputs * selected_stddev + selected_mean
+    #     return outputs
