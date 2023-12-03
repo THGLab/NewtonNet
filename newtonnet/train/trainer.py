@@ -35,8 +35,6 @@ class Trainer:
             checkpoint_test=20,
             checkpoint_model=1,
             verbose=False,
-            target_name=None,
-            force_latent=False,
             ):
         # training parameters
         self.model = model or NewtonNet()
@@ -121,9 +119,13 @@ class Trainer:
             name = name.replace('weight', 'w')
             name = name.replace('bias', 'b')
             name = name.replace('mean', 'm')
-            name = name.replace('stddev', 's')
-            layers.append(name)
-            grads.append(parameter.grad.detach().abs().mean().cpu())
+            name = name.replace('std', 's')
+            if parameter.grad is not None:
+                layers.append(name)
+                grads.append(parameter.grad.detach().abs().mean().cpu())
+            else:
+                # raise ValueError(f'parameter {name} has no gradient')
+                pass
 
         plt.figure(figsize=(16, 3))
         plt.plot(grads, '-', color='tab:blue')
@@ -184,7 +186,12 @@ class Trainer:
                 main_loss = self.main_loss(preds, train_batch)
                 main_loss.backward()
                 if clip_grad > 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
+                    norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
+                    if norm > clip_grad:
+                        print(f'clipped gradients with norm {norm}')
+                if main_loss.isnan():
+                    print(preds['E'])
+                    print(train_batch['E'])
                 self.optimizer.step()
 
                 main_loss = main_loss.detach().item()
@@ -197,6 +204,7 @@ class Trainer:
                 if self.verbose:
                     print(f'Train: Epoch {epoch}/{epochs} - Batch {train_step}/{len(train_generator)} - loss: {main_loss:.5f} - ', end='')
                     print(*[f'{key}: {value:.5f}' for key, value in eval_loss.items()], sep=' - ')
+                # self.plot_grad_flow(f'{epoch}_{train_step}')
 
             for key, value in train_losses.items():
                 train_losses[key] /= len(train_generator) if key == 'loss' else len(train_generator.dataset)
@@ -312,7 +320,7 @@ class Trainer:
 
             # checkpoint
             if epoch % self.check_log == 0:
-                self.plot_grad_flow(epoch)
+                # self.plot_grad_flow(epoch)
                 checkpoint = {}
                 checkpoint.update({'epoch': epoch})
                 checkpoint.update({f'train_{key}': value for key, value in train_losses.items()})

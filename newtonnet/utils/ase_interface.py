@@ -1,13 +1,16 @@
 import numpy as np
 from ase.units import *
 from ase.calculators.calculator import Calculator
+import yaml
+
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.autograd.functional as F
-import yaml
 
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import CosineCutoff, PolynomialCutoff
+from newtonnet.layers.scalers import Normalizer
 from newtonnet.models import NewtonNet
 from newtonnet.data import MolecularDataset
 
@@ -70,13 +73,15 @@ class MLAseCalculator(Calculator):
 
         # torch.set_default_tensor_type(torch.DoubleTensor)
         if type(model_path) is list:
-            self.models = [self.load_model(model_path_, settings_path_) for model_path_, settings_path_ in zip(model_path, settings_path)]
+            self.models = [torch.load(model_path_, map_location=self.device[0]) for model_path_ in model_path]
+            self.settings = [yaml.safe_load(open(settings_path_, 'r')) for settings_path_ in settings_path]
         else:
-            self.models = [self.load_model(model_path, settings_path)]
+            self.models = [torch.load(model_path, map_location=self.device[0])]
+            self.settings = [yaml.safe_load(open(settings_path, 'r'))]
         
 
     def calculate(self, atoms=None, properties=['energy','forces','hessian'], system_changes=None):
-        super().calculate(atoms,properties,system_changes)
+        super().calculate(atoms, properties, system_changes)
         data = self.data_formatter(atoms)
         data = MolecularDataset(data)
         gen = DataLoader(dataset=data, batch_size=len(data), shuffle=False, drop_last=False)
@@ -86,6 +91,8 @@ class MLAseCalculator(Calculator):
             data['AM'] = data['AM'].to(self.device[0])
             data['N'] = data['N'].to(self.device[0])
             data['NM'] = data['NM'].to(self.device[0])
+            data['D'] = data['D'].to(self.device[0])
+            data['V'] = data['V'].to(self.device[0])
             energy = np.zeros((len(self.models), 1))
             forces = np.zeros((len(self.models), data['R'].shape[1], 3))
             hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
@@ -135,6 +142,22 @@ class MLAseCalculator(Calculator):
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
                     del pred
+        # energy = np.zeros((len(self.models), 1))
+        # forces = np.zeros((len(self.models), len(atoms), 3))
+        # hessian = np.zeros((len(self.models), len(atoms), 3, len(atoms), 3))
+        # for model_, model in enumerate(self.models):
+        #     pred = model(
+        #         atomic_numbers=torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long, device=self.device[0])[None, ...], 
+        #         positions=torch.tensor(atoms.get_positions(), dtype=torch.float, device=self.device[0])[None, ...], 
+        #         atom_mask=torch.ones((1, len(atoms.get_atomic_numbers())), dtype=torch.long, device=self.device[0]), 
+        #         neighbors=torch.tensor(atoms.get_all_neighbors(self.settings), dtype=torch.long, device=self.device[0])[None, ...], 
+        #         neighbor_mask=torch.ones((1, len(atoms.get_atomic_numbers()), 6), dtype=torch.long, device=self.device[0]), 
+        #         distances=torch.tensor(atoms.get_all_distances(), dtype=torch.float, device=self.device[0])[None, ...], 
+        #         distance_vectors=torch.tensor(atoms.get_all_displacements(), dtype=torch.float, device=self.device[0])[None, ...],
+        #         )
+        #     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
+        #     forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
+
             self.results['outlier'] = self.q_test(energy)
             self.results['energy'] = self.remove_outlier(energy, self.results['outlier']).mean()
             self.results['forces'] = self.remove_outlier(forces, self.results['outlier']).mean(axis=0)
@@ -158,50 +181,49 @@ class MLAseCalculator(Calculator):
             del energy, forces, hessian
 
 
-    def load_model(self, model_path, settings_path):
-        settings = yaml.safe_load(open(settings_path, "r"))
-        activation = get_activation_by_string(settings['model']['activation'])
-        if settings['model']['cutoff_network'] == 'poly':
-            cutoff_network = PolynomialCutoff(cutoff=settings['data']['cutoff'])
-        elif settings['model']['cutoff_network'] == 'cos':
-            cutoff_network = CosineCutoff(cutoff=settings['data']['cutoff'])
-        model = NewtonNet(
-            n_basis=settings['model']['resolution'],
-            n_features=settings['model']['n_features'],
-            activation=activation,
-            n_layers=settings['model']['n_interactions'],
-            dropout=settings['training']['dropout'],
-            max_z=10,
-            cutoff=settings['data']['cutoff'],  ## data cutoff
-            cutoff_network=cutoff_network,
-            train_normalizer=settings['model']['train_normalizer'],
-            requires_dr=settings['model']['requires_dr'],
-            device=self.device[0],
-            create_graph=False,
-            share_layers=settings['model']['shared_interactions'],
-            return_hessian=self.return_hessian,
-            double_update_latent=settings['model']['double_update_latent'],
-            layer_norm=settings['model']['layer_norm'],
-            )
+    # def load_model(self, model_path, settings_path):
+    #     settings = yaml.safe_load(open(settings_path, "r"))
+    #     activation = get_activation_by_string(settings['model']['activation'])
+    #     if settings['model']['cutoff_network'] == 'poly':
+    #         cutoff_network = PolynomialCutoff(cutoff=settings['data']['cutoff'])
+    #     elif settings['model']['cutoff_network'] == 'cos':
+    #         cutoff_network = CosineCutoff(cutoff=settings['data']['cutoff'])
+    #     model = NewtonNet(
+    #         n_basis=settings['model']['resolution'],
+    #         n_features=settings['model']['n_features'],
+    #         activation=activation,
+    #         n_layers=settings['model']['n_interactions'],
+    #         dropout=settings['training']['dropout'],
+    #         max_z=10,
+    #         cutoff=settings['data']['cutoff'],  ## data cutoff
+    #         cutoff_network=cutoff_network,
+    #         train_normalizer=settings['model']['train_normalizer'],
+    #         requires_dr=settings['model']['requires_dr'],
+    #         device=self.device[0],
+    #         create_graph=False,
+    #         share_layers=settings['model']['shared_interactions'],
+    #         return_hessian=self.return_hessian,
+    #         double_update_latent=settings['model']['double_update_latent'],
+    #         layer_norm=settings['model']['layer_norm'],
+    #         )
 
-        model.load_state_dict(torch.load(model_path, map_location=self.device[0])['model_state_dict'], )
-        model = model
-        model.to(self.device[0])
-        model.eval()
+    #     model = torch.load(model_path, map_location=self.device[0])
+    #     # model.to(self.device[0])
+    #     model.eval()
 
-        if self.script:
-            model = torch.jit.script(model)
-            model.save(model_path[:-4] + '_script.pt')
-        if self.trace_n_atoms:
-            model = torch.jit.trace(
-                model, (
-                    torch.ones((1, self.trace_n_atoms), dtype=torch.long), 
-                    torch.rand((1, self.trace_n_atoms, 3), dtype=torch.float), 
-                    torch.ones((1, self.trace_n_atoms), dtype=torch.long), 
-                    torch.tile(torch.arange(self.trace_n_atoms), (1, self.trace_n_atoms, 1)),
-                    1 - torch.eye(self.trace_n_atoms, dtype=torch.long)[None, :, :]))
+    #     if self.script:
+    #         model = torch.jit.script(model)
+    #         model.save(model_path[:-4] + '_script.pt')
+    #     if self.trace_n_atoms:
+    #         model = torch.jit.trace(
+    #             model, (
+    #                 torch.ones((1, self.trace_n_atoms), dtype=torch.long), 
+    #                 torch.rand((1, self.trace_n_atoms, 3), dtype=torch.float), 
+    #                 torch.ones((1, self.trace_n_atoms), dtype=torch.long), 
+    #                 torch.tile(torch.arange(self.trace_n_atoms), (1, self.trace_n_atoms, 1)),
+    #                 1 - torch.eye(self.trace_n_atoms, dtype=torch.long)[None, :, :]))
 
-        return model
+    #     return model
     
 
     def data_formatter(self, atoms):

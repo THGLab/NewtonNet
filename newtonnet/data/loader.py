@@ -22,18 +22,25 @@ class MolecularDataset(Dataset):
             else:
                 raise ValueError(f'property {property} is not in the input data')
         self.device = device
-        # self.normalizer = None
+        self.normalized = False
 
     def __getitem__(self, index):
         output = dict()
-        for property in ['R', 'Z', 'AM', 'N', 'NM', 'D', 'V'] + self.properties:
-            output[property] = getattr(self, property)[index].to(self.device)
+        if self.normalized:
+            for property in ['R', 'Z', 'AM', 'N', 'NM', 'D', 'V'] + self.properties + [property + '_normalized' for property in self.properties]:
+                output[property] = getattr(self, property)[index].to(self.device)
+        else:
+            for property in ['R', 'Z', 'AM', 'N', 'NM', 'D', 'V'] + self.properties:
+                output[property] = getattr(self, property)[index].to(self.device)
         return output
 
     def __len__(self):
         return self.Z.shape[0]
     
-    # def set_normalizer(self, normalizer):
-    #     self.normalizer = normalizer
-    #     self.E = self.normalizer.forward(self.E, self.Z, scale=True, shift=True)
-    #     self.F = self.normalizer.forward(self.F, self.Z, scale=True, shift=False)
+    def get(self, property):
+        return getattr(self, property)
+    
+    def normalize(self, normalizers):
+        self.normalized = True
+        for property, normalizer in normalizers.items():
+            setattr(self, property + '_normalized', normalizer.forward(getattr(self, property), self.Z))

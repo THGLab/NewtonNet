@@ -1,9 +1,10 @@
 import numpy as np
 import torch
+from torch.nn import ModuleDict
 from torch.utils.data import random_split
 from torch.utils.data import DataLoader
 from newtonnet.data import MolecularDataset, NeighborEnvironment
-from newtonnet.layers.scalers import ScaleShift
+from newtonnet.layers.scalers import Normalizer
 
 
 def split(data, data_sizes):
@@ -60,49 +61,51 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
     properties = settings['data'].get('properties', ['E', 'F'])
     print('Data:')
     if train_path == val_path == test_path:
-        print('use training data for validation and test')
+        print('  use training data for validation and test')
         train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
         train_data, val_data, test_data = split(train_data, (train_size, val_size, test_size))
     elif train_path == val_path:
-        print('use training data for validation')
+        print('  use training data for validation')
         train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
         train_data, val_data = split(train_data, (train_size, val_size, 0))
         test_data = MolecularDataset(np.load(test_path), properties=properties, environment=environment, device=device)
         _, _, test_data = split(test_data, (0, 0, test_size))
     elif train_path == test_path:
-        print('use training data for test')
+        print('  use training data for test')
         train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
         train_data, _, test_data = split(train_data, (train_size, 0, test_size))
         val_data = MolecularDataset(np.load(val_path), properties=properties, environment=environment, device=device)
         _, val_data, _ = split(val_data, (0, val_size, 0))
     elif val_path == test_path:
-        print('use validation data for test')
+        print('  use validation data for test')
         train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
         train_data, _, _, = split(train_data, (train_size, 0, 0))
         val_data = MolecularDataset(np.load(val_path), properties=properties, environment=environment, device=device)
         _, val_data, test_data = split(val_data, (0, val_size, test_size))
     else:
-        print('use separate training, validation, and test data')
+        print('  use separate training, validation, and test data')
         train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
         train_data, _, _ = split(train_data, (train_size, 0, 0))
         val_data = MolecularDataset(np.load(val_path), properties=properties, environment=environment, device=device)
         _, val_data, _ = split(val_data, (0, val_size, 0))
         test_data = MolecularDataset(np.load(test_path), properties=properties, environment=environment, device=device)
         _, _, test_data = split(test_data, (0, 0, test_size))
-    print(f'data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
+    print(f'  data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
 
     # extract data stats
-    # train_E = train_data.dataset.E[train_data.indices]
-    # train_Z = train_data.dataset.Z[train_data.indices]
-    # normalizer = ScaleShift(
-    #     max_z=train_Z.max() + 1, 
-    #     mean=train_E.mean(), 
-    #     stddev=train_E.std(), 
-    #     trainable=False,
-    #     )
-    train_E = train_data.dataset.E[train_data.indices]
-    normalizer = (train_E.mean(), train_E.std())
-    print('normalizer: ', normalizer)
+    print('  normalizers:')
+    normalizers = {}
+    for property in properties:
+        normalizer = Normalizer(
+            data=train_data.dataset.get(property)[train_data.indices],
+            atomic_numbers=train_data.dataset.Z[train_data.indices],
+            trainable=False,
+            )
+        normalizers[property] = normalizer
+        print(f'    {property} normalizer: mean {[normalizer.mean.data.tolist()]}, std {normalizer.std.data.tolist()}')
+    normalizers = ModuleDict(normalizers)
+    for data in [train_data, val_data, test_data]:
+        data.dataset.normalize(normalizers)
     print()
 
     train_batch_size = settings['training'].get('train_batch_size', 32)
@@ -127,4 +130,4 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
         shuffle=False,
         )
 
-    return train_gen, val_gen, test_gen, normalizer
+    return train_gen, val_gen, test_gen, normalizers

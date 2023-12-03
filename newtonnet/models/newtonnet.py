@@ -1,13 +1,11 @@
+from typing import Tuple, Union, List, Dict, Callable
+import copy
+
 import torch
 from torch import nn
 from torch.autograd import grad
-from torch.jit.annotations import Optional
 
-from typing import Tuple, Union, List, Dict, Callable
-
-# from newtonnet.layers import Dense
 from newtonnet.layers.shells import ShellProvider
-from newtonnet.layers.scalers import ScaleShift
 from newtonnet.layers.cutoff import PolynomialCutoff
 from newtonnet.layers.representations import RadialBesselLayer
 
@@ -77,7 +75,7 @@ class NewtonNet(nn.Module):
             max_z: int = 10,
             cutoff: float = 5.0,
             cutoff_network: nn.Module = PolynomialCutoff(),
-            normalizer: tuple = (0.0, 1.0),
+            normalizers: nn.ModuleDict = {},
             train_normalizer: bool = False,
             requires_dr: bool = False,
             device: torch.device = None,
@@ -95,7 +93,6 @@ class NewtonNet(nn.Module):
 
         self.requires_dr = requires_dr
         self.create_graph = create_graph
-        self.train_normalizer = train_normalizer
         self.return_hessian = return_hessian
         self.period_boundary = period_boundary
         self.epsilon = 1.0e-8
@@ -143,24 +140,11 @@ class NewtonNet(nn.Module):
         # final output layer
         self.invariant_node_property = InvariantNodeProperty(n_features, activation, dropout)
 
-        if self.train_normalizer:
-            self.inverse_normalize = ScaleShift(max_z)
+        self.train_normalizer = train_normalizer
+        if train_normalizer:
+            self.normalizers = nn.ModuleDict({property: copy.deepcopy(normalizer).requires_grad_(True) for property, normalizer in normalizers.items()})
         else:
-            if type(normalizer) is dict:
-                normalizer = torch.tensor([normalizer.get(i, (0, 1)) for i in range(max_z)], device=device)
-                self.inverse_normalize = ScaleShift(
-                    max_z=max_z,
-                    mean=normalizer[:, 0],
-                    stddev=normalizer[:, 1],
-                    trainable=False,
-                    )
-            else:
-                self.inverse_normalize = ScaleShift(
-                    max_z=max_z,
-                    mean=torch.tensor(normalizer[0], device=device),
-                    stddev=torch.tensor(normalizer[1], device=device),
-                    trainable=False,
-                    )
+            self.normalizers = normalizers
 
         self.atomic_properties_only = atomic_properties_only
         self.aggregration = aggregration
@@ -209,27 +193,16 @@ class NewtonNet(nn.Module):
                 equivariant_node_dr,
                 )
 
-        # When using the network to obtain atomic properties only
-        if self.atomic_properties_only:
-            invariant_node_output = self.invariant_node_property(invariant_node)
-            invariant_node_output = self.inverse_normalize(invariant_node_output, atomic_numbers)
-            return {'Ai': invariant_node_output}
-
         # output net
-        invariant_node_output = self.invariant_node_property(invariant_node)
-        invariant_node_output = self.inverse_normalize(invariant_node_output, atomic_numbers)
-        # if self.train_normalizer:
-        #     Ei = self.inverse_normalize(Ei, atomic_numbers)
+        Ei = self.invariant_node_property(invariant_node)
 
         # inverse normalize
-        invariant_node_output = invariant_node_output * atom_mask[..., None]  # (B,A,1)
-        invariant_graph_output = self.aggregration(invariant_node_output, dim=1)  # (B,1)
-        # if not self.train_normalizer:
-        #     E = self.inverse_normalize(E, torch.zeros_like(E, dtype=torch.long))
+        Ei = Ei * atom_mask[:, :, None]  # (B,A,1)
+        E = self.aggregration(Ei, dim=1)  # (B,1)
 
         if self.requires_dr:
             if self.return_hessian:
-                invariant_graph_output_derivative = grad([invariant_graph_output], [positions], grad_outputs=[torch.ones(invariant_graph_output.shape[0], 1, device=positions.device) if invariant_graph_output.shape[0]==positions.shape[0] else None], create_graph=True, retain_graph=True)[0]
+                dE = grad([E], [positions], grad_outputs=[torch.ones(E.shape[0], 1, device=positions.device) if E.shape[0]==positions.shape[0] else None], create_graph=True, retain_graph=True)[0]
                 # TODO: make Hessian calculations work
                 # ddE = torch.zeros(E.shape[0], R.shape[1], R.shape[2], R.shape[1], R.shape[2], device=R.device)
                 # for A_ in range(R.shape[1]):
@@ -240,18 +213,43 @@ class NewtonNet(nn.Module):
                 # ddE = torch.vmap(lambda V: grad(dE, R, grad_outputs=V, create_graph=True, retain_graph=True))(torch.eye(R.shape[1] * R.shape[2], device=R.device).reshape((-1, 1, R.shape[1], R.shape[2])).repeat(1, R.shape[0], 1, 1))
                 # ddE = ddE.permute(1,2,3,0).unflatten(dim=3, sizes=(-1, 3))
             else:
-                invariant_graph_output_derivative = grad([invariant_graph_output], [positions], grad_outputs=[torch.ones(invariant_graph_output.shape[0], 1, device=positions.device) if invariant_graph_output.shape[0]==positions.shape[0] else None], create_graph=True, retain_graph=True)[0]
+                dE = grad([E], [positions], grad_outputs=[torch.ones(E.shape[0], 1, device=positions.device) if E.shape[0]==positions.shape[0] else None], create_graph=True, retain_graph=True)[0]
         else:
-            invariant_graph_output_derivative = torch.zeros_like(positions)
-        assert invariant_graph_output_derivative is not None
-        invariant_graph_output_derivative = -invariant_graph_output_derivative
+            dE = torch.zeros_like(positions)
+        assert dE is not None
+        dE = -dE
+
+        outputs = {'E': E, 'F': dE}
+        self.normalize(outputs, atomic_numbers)
 
         if self.return_hessian:
             # TODO: make Hessian calculations work
             # return {'R': R, 'E': E, 'F': dE, 'H': ddE, 'Ei': Ei, 'F_latent': f_dir}
-            return {'R': positions, 'E': invariant_graph_output, 'F': invariant_graph_output_derivative, 'Ei': invariant_node_output, 'F_latent': equivariant_node_F}
+            return outputs
         else:
-            return {'R': positions, 'E': invariant_graph_output, 'F': invariant_graph_output_derivative, 'Ei': invariant_node_output, 'F_latent': equivariant_node_F}
+            return outputs
+        
+    def normalize(self, inputs, atomic_numbers):
+        """Normalize the input data.
+
+        Parameters
+        ----------
+        inputs: torch.Tensor
+            input data.
+
+        atomic_numbers: torch.Tensor
+            atomic numbers.
+
+        Returns
+        -------
+        torch.Tensor: normalized data.
+
+        """
+        outputs = {}
+        for property, value in inputs.items():
+            if property in self.normalizers.keys():
+                outputs[property + '_normalized'] = self.normalizers[property].forward(value, atomic_numbers)
+        inputs.update(outputs)
 
 
 class MessagePassingLayer(nn.Module):
@@ -430,10 +428,12 @@ class InvariantNodeProperty(nn.Module):
                 activation,
                 nn.Linear(64, 1),
                 )
+        self.clamp_max = 1e+6
 
     def forward(self, invariant_node):
 
         output = self.invariant_node_prediction(invariant_node)
+        output = torch.clamp(output, max=self.clamp_max)
 
         return output
 
