@@ -7,7 +7,7 @@ from typing import Tuple, Union, List, Dict, Callable
 
 # from newtonnet.layers import Dense
 from newtonnet.layers.shells import ShellProvider
-from newtonnet.layers.scalers import TrainableScaleShift
+from newtonnet.layers.scalers import ScaleShift
 from newtonnet.layers.cutoff import PolynomialCutoff
 from newtonnet.layers.representations import RadialBesselLayer
 
@@ -144,18 +144,18 @@ class NewtonNet(nn.Module):
         self.invariant_node_property = InvariantNodeProperty(n_features, activation, dropout)
 
         if self.train_normalizer:
-            self.inverse_normalize = TrainableScaleShift(max_z)
+            self.inverse_normalize = ScaleShift(max_z)
         else:
             if type(normalizer) is dict:
                 normalizer = torch.tensor([normalizer.get(i, (0, 1)) for i in range(max_z)], device=device)
-                self.inverse_normalize = TrainableScaleShift(
+                self.inverse_normalize = ScaleShift(
                     max_z=max_z,
                     mean=normalizer[:, 0],
                     stddev=normalizer[:, 1],
                     trainable=False,
                     )
             else:
-                self.inverse_normalize = TrainableScaleShift(
+                self.inverse_normalize = ScaleShift(
                     max_z=max_z,
                     mean=torch.tensor(normalizer[0], device=device),
                     stddev=torch.tensor(normalizer[1], device=device),
