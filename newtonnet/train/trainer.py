@@ -186,12 +186,15 @@ class Trainer:
                 main_loss = self.main_loss(preds, train_batch)
                 main_loss.backward()
                 if clip_grad > 0:
+                    # torch.nn.utils.clip_grad_value_(self.model.parameters(), 100)
                     norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
-                    if norm > clip_grad:
-                        print(f'clipped gradients with norm {norm}')
+                    # if norm > clip_grad:
+                    #     print(f'clipped gradients with norm {norm}')
+                    #     for n, p in self.model.named_parameters():
+                    #         if p.grad is not None:
+                    #             print(f'{n}: {p.grad}')
                 if main_loss.isnan():
-                    print(preds['E'])
-                    print(train_batch['E'])
+                    raise ValueError('loss is nan')
                 self.optimizer.step()
 
                 main_loss = main_loss.detach().item()
@@ -320,7 +323,7 @@ class Trainer:
 
             # checkpoint
             if epoch % self.check_log == 0:
-                # self.plot_grad_flow(epoch)
+                self.plot_grad_flow(epoch)
                 checkpoint = {}
                 checkpoint.update({'epoch': epoch})
                 checkpoint.update({f'train_{key}': value for key, value in train_losses.items()})

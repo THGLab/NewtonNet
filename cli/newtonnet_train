@@ -53,7 +53,7 @@ else:
 
 # data
 torch.manual_seed(settings['data'].get('random_states', 42))
-train_gen, val_gen, test_gen, normalizers = parse_train_test(settings, device[0])
+train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers = parse_train_test(settings, device[0])
 
 # model
 # activation function
@@ -67,7 +67,7 @@ model = NewtonNet(
     activation=activation,
     n_layers=settings['model']['n_interactions'],
     dropout=settings['training']['dropout'],
-    max_z=settings['model']['max_z'],
+    embedded_atomic_numbers=embedded_atomic_numbers,
     cutoff=settings['data']['cutoff'],  ## data cutoff
     cutoff_network=cutoff_network,
     normalizers=normalizers,

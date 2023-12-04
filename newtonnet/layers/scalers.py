@@ -35,7 +35,7 @@ class Normalizer(nn.Module):
         self.std = nn.Parameter(std, requires_grad=trainable)
 
 
-    def forward(self, inputs, atomic_numbers, scale=True, shift=True):
+    def forward(self, inputs, atomic_numbers):
         """Compute layer output.
 
         Parameters
@@ -63,30 +63,30 @@ class Normalizer(nn.Module):
         outputs = (inputs - selected_mean) / selected_std
         return outputs
     
-    # def reverse(self, inputs, atomic_numbers):
-    #     """Compute layer output.
+    def reverse(self, inputs, atomic_numbers):
+        """Compute layer output.
 
-    #     Parameters
-    #     ----------
-    #     input_energies: torch.Tensor
-    #         input atomic energies.
+        Parameters
+        ----------
+        input_energies: torch.Tensor
+            input atomic energies.
 
-    #     z: torch.Tensor
-    #         input atomic numbers
+        z: torch.Tensor
+            input atomic numbers
 
-    #     Returns
-    #     -------
-    #     torch.Tensor: layer output.
+        Returns
+        -------
+        torch.Tensor: layer output.
 
-    #     """
-    #     dim = inputs.dim()
-    #     if dim == 2:    # graph property  # inputs in data_size, _
-    #         selected_mean = self.mean
-    #         selected_stddev = self.std
-    #     elif dim == 3:    # node property  # inputs in data_size, n_atoms, _
-    #         selected_mean = self.mean[atomic_numbers][:, :, None]
-    #         selected_stddev = self.std[atomic_numbers][:, :, None]
-    #     else:
-    #         raise ValueError(f'inputs dimension {dim} is not supported')
-    #     outputs = inputs * selected_stddev + selected_mean
-    #     return outputs
+        """
+        dim = inputs.dim()
+        if dim == 2:    # graph property  # inputs in data_size, _
+            selected_mean = self.mean
+            selected_stddev = self.std
+        elif dim == 3:    # node property  # inputs in data_size, n_atoms, _
+            selected_mean = self.mean[atomic_numbers][:, :, None]
+            selected_stddev = self.std[atomic_numbers][:, :, None]
+        else:
+            raise ValueError(f'inputs dimension {dim} is not supported')
+        outputs = inputs * selected_stddev + selected_mean
+        return outputs
