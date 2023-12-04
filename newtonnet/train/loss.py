@@ -19,13 +19,13 @@ def get_loss_by_string(**kwargs):
     if mode == 'energy/force':
         main_losses = []
         if kwargs.get('w_energy', 0.0) > 0.0:
-            main_losses.append(ScalarLoss('E', mode='mse', masked=False, weight=kwargs['w_energy']))
+            main_losses.append(ScalarLoss('E_normalized', mode='mse', masked=False, weight=kwargs['w_energy']))
         if kwargs.get('w_force', 0.0) > 0.0:
-            main_losses.append(VectorLoss('F', mode='mse', masked=False, weight=kwargs['w_force']))
+            main_losses.append(VectorLoss('F_normalized', mode='mse', masked=False, weight=kwargs['w_force']))
         if kwargs.get('w_f_mag', 0.0) > 0.0:
-            main_losses.append(VectorNormLoss('F', mode='mse', masked=False, weight=kwargs['w_f_mag']))
+            main_losses.append(VectorNormLoss('F_normalized', mode='mse', masked=False, weight=kwargs['w_f_mag']))
         if kwargs.get('w_f_dir', 0.0) > 0.0:
-            main_losses.append(VectorCosLoss('F', mode='mse', masked=False, weight=kwargs['w_f_dir']))
+            main_losses.append(VectorCosLoss('F_normalized', mode='mse', masked=False, weight=kwargs['w_f_dir']))
         main_loss = MultitaskLoss(mode=mode, loss_fns=main_losses, sum=True)
 
         eval_losses = []
