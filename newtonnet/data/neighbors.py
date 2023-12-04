@@ -59,21 +59,46 @@ class NeighborEnvironment(object):
 
         """
     
-        n_data, n_atoms, _ = positions.shape
+        _, n_atoms, _ = positions.shape
 
         self._check_shapes(positions.shape, atomic_numbers.shape)
 
-        neighbors = torch.arange(n_atoms, dtype=torch.long)[None, None, :].expand(n_data, n_atoms, -1)  # n_data, n_atoms, n_atoms
-
         # mask based on zero atomic_numbers
-        atom_mask = (atomic_numbers > 0).long()  # n_data, n_atoms
+        atom_mask = (atomic_numbers > 0)  # data_size, n_atoms
 
-        neighbor_mask = atom_mask[:, :, None] * atom_mask[:, None, :]  # n_data, n_atoms, n_atoms
+        neighbor_mask = atom_mask.unsqueeze(1) * atom_mask.unsqueeze(2)  # data_size, n_atoms, n_atoms
         neighbor_mask[:, torch.arange(n_atoms), torch.arange(n_atoms)] = 0
-        neighbors = neighbors * neighbor_mask  # n_data, n_atoms, n_atoms
 
-        distances, distance_vectors, neighbors, neighbor_mask = self.shell(positions, neighbors, neighbor_mask, lattice)
+        # subtract positions of central atoms to get distance vectors
+        distance_vectors = positions[:, None, :, :] - positions[:, :, None, :]    # data_size, n_atoms, n_atoms, 3
+        if self.periodic_boundary:
+            lattice_shift_vectors = torch.tensor(
+                [[[[i, j, k] for i in (-1, 0, 1)] for j in (-1, 0, 1)] for k in (-1, 0, 1)],
+                dtype=lattice.dtype,
+                device=lattice.device,
+                ).reshape((27, 3))    # 27, 3
+            distance_shift_vectors = lattice_shift_vectors @ lattice[None, :, :]    # data_size, 27, 3
+            distance_vectors = distance_vectors[:, :, :, None, :] + distance_shift_vectors[:, None, None, :, :]    # data_size, n_atoms, n_atoms, 27, 3
+            distances = torch.norm(distance_vectors, dim=-1, keepdim=True)    # data_size, n_atoms, n_atoms, 27, 1
+            distance_min_index = torch.argmin(distances, dim=-2, keepdim=True)    # data_size, n_atoms, n_atoms, 1, 1
+            distances = torch.gather(distances, dim=-2, index=distance_min_index).squeeze(-2)    # data_size, n_atoms, n_atoms, 1
+            distance_vectors = torch.gather(distance_vectors, dim=-2, index=distance_min_index.expand(-1, -1, -1, -1, 3)).squeeze(-2)    # data_size, n_atoms, n_atoms, 3
+        else:
+            distances = torch.norm(distance_vectors, dim=-1, keepdim=False)   # data_size, n_atoms, n_atoms
+        
+        # mask based on cutoff
+        if self.cutoff is not None:
+            neighbor_mask = neighbor_mask * (distances < self.cutoff)    # data_size, n_atoms, n_atoms
+        
+        # sparsify matrices
+        atom_mask_sparse = atom_mask.to_sparse()
+        neighbor_mask_sparse = neighbor_mask.to_sparse()
+        indices = neighbor_mask_sparse.indices()
+        distances_sparse = torch.sparse.FloatTensor(values=distances[neighbor_mask].flatten(), indices=indices, size=distances.shape)
+        indices_expanded = (indices.repeat_interleave(3, dim=1), torch.arange(3).repeat(1, indices.shape[1]))
+        indices_expanded = torch.cat(indices_expanded, dim=0)
+        distance_vectors_sparse = torch.sparse.FloatTensor(values=distance_vectors[neighbor_mask].flatten(), indices=indices_expanded, size=distance_vectors.shape)
 
-        return neighbors, neighbor_mask, atom_mask, distances, distance_vectors
+        return distances_sparse, distance_vectors_sparse, atom_mask_sparse, neighbor_mask_sparse
     
     

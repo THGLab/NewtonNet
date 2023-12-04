@@ -14,7 +14,7 @@ class MolecularDataset(Dataset):
     def __init__(self, input, properties=['E', 'F'], environment=NeighborEnvironment(), device: torch.device = torch.device('cpu')):
         self.R = torch.tensor(input['R'], dtype=torch.float)
         self.Z = torch.tensor(input['Z'], dtype=torch.long)
-        self.N, self.NM, self.AM, self.D, self.V = environment.get_environment(self.R, self.Z)
+        self.D, self.V, self.AM, self.NM = environment.get_environment(self.R, self.Z)
         self.properties = properties
         for property in self.properties:
             if property in input.keys():
@@ -27,10 +27,10 @@ class MolecularDataset(Dataset):
     def __getitem__(self, index):
         output = dict()
         if self.normalized:
-            for property in ['R', 'Z', 'AM', 'N', 'NM', 'D', 'V'] + self.properties + [property + '_normalized' for property in self.properties]:
+            for property in ['R', 'Z', 'AM', 'NM', 'D', 'V'] + self.properties + [property + '_normalized' for property in self.properties]:
                 output[property] = getattr(self, property)[index].to(self.device)
         else:
-            for property in ['R', 'Z', 'AM', 'N', 'NM', 'D', 'V'] + self.properties:
+            for property in ['R', 'Z', 'AM', 'NM', 'D', 'V'] + self.properties:
                 output[property] = getattr(self, property)[index].to(self.device)
         return output
 

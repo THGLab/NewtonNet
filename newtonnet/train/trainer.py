@@ -186,15 +186,7 @@ class Trainer:
                 main_loss = self.main_loss(preds, train_batch)
                 main_loss.backward()
                 if clip_grad > 0:
-                    # torch.nn.utils.clip_grad_value_(self.model.parameters(), 100)
-                    norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
-                    # if norm > clip_grad:
-                    #     print(f'clipped gradients with norm {norm}')
-                    #     for n, p in self.model.named_parameters():
-                    #         if p.grad is not None:
-                    #             print(f'{n}: {p.grad}')
-                if main_loss.isnan():
-                    raise ValueError('loss is nan')
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
                 self.optimizer.step()
 
                 main_loss = main_loss.detach().item()
@@ -341,11 +333,3 @@ class Trainer:
 
             # # loss force weight decay
             # self.main_loss.force_loss_decay()
-
-    def log_statistics(self, n_train_data, n_val_data, n_test_data, normalizer, test_energy_hash):
-        with open(os.path.join(self.output_path, "stats.txt"), "w") as f:
-            f.write("Train data: %d\n" % n_train_data)
-            f.write("Val data: %d\n" % n_val_data)
-            f.write("Test data: %d\n" % n_test_data)
-            f.write("Normalizer: %s\n" % str(normalizer))
-            f.write("Test energy hash: %s\n" % test_energy_hash)
