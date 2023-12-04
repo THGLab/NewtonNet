@@ -72,7 +72,7 @@ class NewtonNet(nn.Module):
             activation: nn.Module = nn.SiLU(),
             n_layers: int = 3,
             dropout: float = 0.0,
-            max_z: int = 10,
+            embedded_atomic_numbers: torch.Tensor = torch.tensor([1, 6, 7, 8]),
             cutoff: float = 5.0,
             cutoff_network: nn.Module = PolynomialCutoff(),
             normalizers: nn.ModuleDict = {},
@@ -99,7 +99,10 @@ class NewtonNet(nn.Module):
 
         # atomic embedding
         self.n_features = n_features
-        self.node_embedding = nn.Embedding(max_z, n_features, padding_idx=0, device=device)
+        self.node_embedding = nn.Embedding(embedded_atomic_numbers.max() + 1, n_features, padding_idx=0, device=device)
+        for z in range(1, embedded_atomic_numbers.max() + 1):
+            if z not in embedded_atomic_numbers:
+                self.node_embedding.weight.data[z] = torch.nan
 
         # edge embedding
         shell_cutoff = cutoff
@@ -194,11 +197,15 @@ class NewtonNet(nn.Module):
                 )
 
         # output net
+        outputs = {}
         Ei = self.invariant_node_property(invariant_node)
 
         # inverse normalize
         Ei = Ei * atom_mask[:, :, None]  # (B,A,1)
         E = self.aggregration(Ei, dim=1)  # (B,1)
+        outputs['E_normalized'] = E
+        E = self.normalizers['E'].reverse(E, atomic_numbers)
+        outputs['E'] = E
 
         if self.requires_dr:
             if self.return_hessian:
@@ -219,8 +226,8 @@ class NewtonNet(nn.Module):
         assert dE is not None
         dE = -dE
 
-        outputs = {'E': E, 'F': dE}
-        self.normalize(outputs, atomic_numbers)
+        outputs['F'] = dE
+        outputs['F_normalized'] = self.normalizers['F'].forward(dE, atomic_numbers)
 
         if self.return_hessian:
             # TODO: make Hessian calculations work
@@ -228,28 +235,6 @@ class NewtonNet(nn.Module):
             return outputs
         else:
             return outputs
-        
-    def normalize(self, inputs, atomic_numbers):
-        """Normalize the input data.
-
-        Parameters
-        ----------
-        inputs: torch.Tensor
-            input data.
-
-        atomic_numbers: torch.Tensor
-            atomic numbers.
-
-        Returns
-        -------
-        torch.Tensor: normalized data.
-
-        """
-        outputs = {}
-        for property, value in inputs.items():
-            if property in self.normalizers.keys():
-                outputs[property + '_normalized'] = self.normalizers[property].forward(value, atomic_numbers)
-        inputs.update(outputs)
 
 
 class MessagePassingLayer(nn.Module):
@@ -269,6 +254,8 @@ class MessagePassingLayer(nn.Module):
 
         # non-directional message passing
         self.invariant_message_edge = nn.Linear(n_basis, n_features)
+        nn.init.xavier_uniform_(self.invariant_message_edge.weight)
+        nn.init.zeros_(self.invariant_message_edge.bias)
         self.invariant_message_node = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
@@ -280,6 +267,7 @@ class MessagePassingLayer(nn.Module):
 
         # directional message passing
         self.equivariant_message_coefficient = nn.Linear(n_features, 1, bias=False)
+        nn.init.xavier_uniform_(self.equivariant_message_coefficient.weight)
         self.equivariant_message_feature = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
@@ -412,13 +400,13 @@ class InvariantNodeProperty(nn.Module):
         super(InvariantNodeProperty, self).__init__()
         if dropout > 0.0:
             self.invariant_node_prediction = nn.Sequential(
-                nn.Linear(n_features, 128),
+                nn.Linear(n_features, n_features),
                 activation,
                 nn.Dropout(dropout),
-                nn.Linear(128, 64),
+                nn.Linear(n_features, n_features),
                 activation,
                 nn.Dropout(dropout),
-                nn.Linear(64, 1),
+                nn.Linear(n_features, 1),
                 )
         else:
             self.invariant_node_prediction = nn.Sequential(
@@ -428,12 +416,12 @@ class InvariantNodeProperty(nn.Module):
                 activation,
                 nn.Linear(64, 1),
                 )
-        self.clamp_max = 1e+6
+        self.clamp = 1.0e+8
 
     def forward(self, invariant_node):
-
+        
         output = self.invariant_node_prediction(invariant_node)
-        output = torch.clamp(output, max=self.clamp_max)
+        # output = torch.clamp(output, -self.clamp, self.clamp)
 
         return output
 

@@ -93,6 +93,10 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
     print(f'  data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
 
     # extract data stats
+    print('  embedded atomic numbers:')
+    embedded_atomic_numbers = torch.unique(train_data.dataset.Z[train_data.indices])
+    embedded_atomic_numbers = embedded_atomic_numbers[embedded_atomic_numbers > 0]
+    print(f'    {embedded_atomic_numbers.tolist()}')
     print('  normalizers:')
     normalizers = {}
     for property in properties:
@@ -102,7 +106,7 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
             trainable=False,
             )
         normalizers[property] = normalizer
-        print(f'    {property} normalizer: mean {[normalizer.mean.data.tolist()]}, std {normalizer.std.data.tolist()}')
+        print(f'    {property} normalizer: mean {normalizer.mean.data.tolist()}, std {normalizer.std.data.tolist()}')
     normalizers = ModuleDict(normalizers)
     for data in [train_data, val_data, test_data]:
         data.dataset.normalize(normalizers)
@@ -130,4 +134,4 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
         shuffle=False,
         )
 
-    return train_gen, val_gen, test_gen, normalizers
+    return train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers
