@@ -20,10 +20,11 @@ class NeighborEnvironment(object):
             self, 
             cutoff: float = 5.0,
             periodic_boundary: bool = False,
+            lattice: torch.Tensor = torch.eye(3) * 10.0,
             ):
         self.cutoff = cutoff
         self.periodic_boundary = periodic_boundary
-        self.shell = ShellProvider(cutoff=cutoff, periodic_boundary=periodic_boundary)
+        self.lattice = lattice
 
     def _check_shapes(self, Rshape, Zshape):
         if Rshape[0] != Zshape[0]:
@@ -38,7 +39,7 @@ class NeighborEnvironment(object):
             msg = "@ExtensiveEnvironment: atoms and atomic_numbers must have same dimension 1 (n_atoms)."
             raise ValueError(msg)
 
-    def get_environment(self, positions, atomic_numbers, lattice=torch.eye(3)):
+    def get_environment(self, positions, atomic_numbers):
         """
         This function finds atomic environments extensively for each atom in the frame.
 
@@ -74,10 +75,10 @@ class NeighborEnvironment(object):
         if self.periodic_boundary:
             lattice_shift_vectors = torch.tensor(
                 [[[[i, j, k] for i in (-1, 0, 1)] for j in (-1, 0, 1)] for k in (-1, 0, 1)],
-                dtype=lattice.dtype,
-                device=lattice.device,
+                dtype=self.lattice.dtype,
+                device=self.lattice.device,
                 ).reshape((27, 3))    # 27, 3
-            distance_shift_vectors = lattice_shift_vectors @ lattice[None, :, :]    # data_size, 27, 3
+            distance_shift_vectors = lattice_shift_vectors @ self.lattice[None, :, :]    # data_size, 27, 3
             distance_vectors = distance_vectors[:, :, :, None, :] + distance_shift_vectors[:, None, None, :, :]    # data_size, n_atoms, n_atoms, 27, 3
             distances = torch.norm(distance_vectors, dim=-1, keepdim=True)    # data_size, n_atoms, n_atoms, 27, 1
             distance_min_index = torch.argmin(distances, dim=-2, keepdim=True)    # data_size, n_atoms, n_atoms, 1, 1
@@ -93,10 +94,10 @@ class NeighborEnvironment(object):
         # sparsify matrices
         atom_mask_sparse = atom_mask.to_sparse()
         neighbor_mask_sparse = neighbor_mask.to_sparse()
-        indices = neighbor_mask_sparse.indices()
+        indices = neighbor_mask_sparse.indices()    # 3, n_atoms * n_neighbors
         distances_sparse = torch.sparse.FloatTensor(values=distances[neighbor_mask].flatten(), indices=indices, size=distances.shape)
         indices_expanded = (indices.repeat_interleave(3, dim=1), torch.arange(3).repeat(1, indices.shape[1]))
-        indices_expanded = torch.cat(indices_expanded, dim=0)
+        indices_expanded = torch.cat(indices_expanded, dim=0)    # 4, n_atoms * n_neighbors * 3
         distance_vectors_sparse = torch.sparse.FloatTensor(values=distance_vectors[neighbor_mask].flatten(), indices=indices_expanded, size=distance_vectors.shape)
 
         return distances_sparse, distance_vectors_sparse, atom_mask_sparse, neighbor_mask_sparse

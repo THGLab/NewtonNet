@@ -49,7 +49,9 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
     # environment
     cutoff = settings['data'].get('cutoff', 5.0)
     periodic_boundary = settings['data'].get('periodic_boundary', False)
-    environment = NeighborEnvironment(cutoff=cutoff, periodic_boundary=periodic_boundary)
+    lattice = settings['data'].get('lattice', np.eye(3) * 10.0)
+    lattice = torch.tensor(lattice, dtype=torch.float)
+    environment = NeighborEnvironment(cutoff=cutoff, periodic_boundary=periodic_boundary, lattice=lattice)
 
     # meta data
     train_path = settings['data'].get('train_path', None)
