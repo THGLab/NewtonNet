@@ -16,12 +16,6 @@ from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.layers.aggregation import get_aggregation_by_string
 from newtonnet.train.loss import get_loss_by_string
 from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
-# from newtonnet.data import parse_ani_data
-# from newtonnet.data import parse_methane_data
-# from newtonnet.data import parse_t1x_data
-
-# torch.autograd.set_detect_anomaly(True)
-# torch.set_default_tensor_type(torch.DoubleTensor)
 
 # argument parser description
 parser = argparse.ArgumentParser(
@@ -53,13 +47,28 @@ else:
 
 # data
 torch.manual_seed(settings['data'].get('random_states', 42))
-train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers = parse_train_test(settings, device[0])
+train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell = parse_train_test(
+    train_path=settings['data'].get('train_path', None),
+    val_path=settings['data'].get('val_path', None),
+    test_path=settings['data'].get('test_path', None),
+    properties=settings['data'].get('properties', ['E', 'F']),
+    cutoff=settings['data'].get('cutoff', 5.0),
+    train_size=settings['data'].get('train_size', -1),
+    val_size=settings['data'].get('val_size', -1),
+    test_size=settings['data'].get('test_size', -1),
+    train_batch_size=settings['training'].get('train_batch_size', 32),
+    val_batch_size=settings['training'].get('val_batch_size', 32),
+    test_batch_size=settings['training'].get('test_batch_size', 32),
+    periodic_boundary=settings['data'].get('periodic_boundary', False),
+    lattice=settings['data'].get('lattice', torch.eye(3, dtype=torch.float) * 10.0),
+    device=device[0],
+    )
 
 # model
 # activation function
-activation = get_activation_by_string(settings['model']['activation'])
-cutoff_network = get_cutoff_by_string(settings['model']['cutoff_network'], settings['data']['cutoff'])
-aggregation = get_aggregation_by_string(settings['model']['aggregation'])
+activation = get_activation_by_string(settings['model'].get('activation', 'swish'))
+cutoff_network = get_cutoff_by_string(settings['model'].get('cutoff_network', 'poly'), shell.cutoff)
+aggregation = get_aggregation_by_string(settings['model'].get('aggregation', 'sum'))
 
 model = NewtonNet(
     n_basis=settings['model']['resolution'],
@@ -68,11 +77,11 @@ model = NewtonNet(
     n_layers=settings['model']['n_interactions'],
     dropout=settings['training']['dropout'],
     embedded_atomic_numbers=embedded_atomic_numbers,
-    cutoff=settings['data']['cutoff'],  ## data cutoff
     cutoff_network=cutoff_network,
     normalizers=normalizers,
     train_normalizer=settings['model']['train_normalizer'],
     requires_dr=settings['model']['requires_dr'],
+    shell=shell,
     device=device[0],
     create_graph=True,
     share_layers=settings['model']['shared_interactions'],
