@@ -17,7 +17,22 @@ def split(data, data_sizes):
 
     return train_data, val_data, test_data
 
-def parse_train_test(settings, device: torch.device = torch.device('cpu')):
+def parse_train_test(
+        train_path: str = None,
+        val_path: str = None,
+        test_path: str = None,
+        train_size: int = -1,
+        val_size: int = -1,
+        test_size: int = -1,
+        train_batch_size: int = 32,
+        val_batch_size: int = 32,
+        test_batch_size: int = 32,
+        properties: list = ['E', 'F'],
+        periodic_boundary: bool = False,
+        lattice: torch.tensor = torch.eye(3, dtype=torch.float) * 10.0,
+        cutoff: float = 5.0,
+        device: torch.device = torch.device('cpu'),
+        ):
     """
     Implementation based on pre-splitted training, validation, and test data.
 
@@ -34,7 +49,7 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
             - 'train_batch_size' (int, default=32): Batch size for training.
             - 'val_batch_size' (int, default=32): Batch size for validation.
             - 'test_batch_size' (int, default=32): Batch size for test.
-            - 'random_states' (int, default=0): Random state for sampling data.
+            - 'random_states' (int, default=42): Random state for sampling data.
 
     device: list
         List of torch devices.
@@ -47,20 +62,18 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
 
     """
     # environment
-    cutoff = settings['data'].get('cutoff', 5.0)
-    periodic_boundary = settings['data'].get('periodic_boundary', False)
-    lattice = settings['data'].get('lattice', np.eye(3) * 10.0)
-    lattice = torch.tensor(lattice, dtype=torch.float)
     environment = NeighborEnvironment(cutoff=cutoff, periodic_boundary=periodic_boundary, lattice=lattice)
+    shell = environment.shell
 
     # meta data
-    train_path = settings['data'].get('train_path', None)
-    val_path = settings['data'].get('val_path', train_path)
-    test_path = settings['data'].get('test_path', val_path)
-    train_size = settings['data'].get('train_size', -1)
-    val_size = settings['data'].get('val_size', -1)
-    test_size = settings['data'].get('test_size', -1)
-    properties = settings['data'].get('properties', ['E', 'F'])
+    if train_path is None:
+        raise ValueError('train_path is required')
+    if val_path is None:
+        val_path = train_path
+    if test_path is None:
+        test_path = val_path
+
+    # load data
     print('Data:')
     if train_path == val_path == test_path:
         print('  use training data for validation and test')
@@ -114,10 +127,6 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
         data.dataset.normalize(normalizers)
     print()
 
-    train_batch_size = settings['training'].get('train_batch_size', 32)
-    val_batch_size = settings['training'].get('val_batch_size', 32)
-    test_batch_size = settings['training'].get('test_batch_size', 32)
-
     train_gen = DataLoader(
         dataset=train_data,
         batch_size=train_batch_size,
@@ -136,4 +145,4 @@ def parse_train_test(settings, device: torch.device = torch.device('cpu')):
         shuffle=False,
         )
 
-    return train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers
+    return train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell

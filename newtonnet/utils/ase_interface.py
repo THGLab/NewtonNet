@@ -89,7 +89,6 @@ class MLAseCalculator(Calculator):
             data['R'] = data['R'].to(self.device[0])
             data['Z'] = data['Z'].to(self.device[0])
             data['AM'] = data['AM'].to(self.device[0])
-            data['N'] = data['N'].to(self.device[0])
             data['NM'] = data['NM'].to(self.device[0])
             data['D'] = data['D'].to(self.device[0])
             data['V'] = data['V'].to(self.device[0])
@@ -107,14 +106,14 @@ class MLAseCalculator(Calculator):
                     #energy = self.model(data).detach().cpu().numpy()
                     #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
                     #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
                     energy[model_] = pred['E'].detach().cpu().numpy() * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
                     del pred
             elif self.hess_method=='fwd_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
@@ -126,7 +125,7 @@ class MLAseCalculator(Calculator):
                     del pred
             elif self.hess_method=='cnt_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
@@ -138,7 +137,7 @@ class MLAseCalculator(Calculator):
                     del pred
             elif self.hess_method is None:
                 for model_, model in enumerate(self.models):
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbors=data['N'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
+                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
                     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
                     forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
                     del pred

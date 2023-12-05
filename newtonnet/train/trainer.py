@@ -167,8 +167,6 @@ class Trainer:
             # training
             train_losses['loss'] = 0.0
             self.model.train()
-            # self.model.requires_dr = self.requires_dr
-            # self.optimizer.zero_grad()
 
             for train_step, train_batch in enumerate(train_generator):
                 batch_size = train_batch['Z'].shape[0]
@@ -178,7 +176,6 @@ class Trainer:
                     atomic_numbers=train_batch['Z'], 
                     positions=train_batch['R'], 
                     atom_mask=train_batch['AM'], 
-                    neighbors=train_batch['N'], 
                     neighbor_mask=train_batch['NM'],
                     distances=train_batch['D'],
                     distance_vectors=train_batch['V'],
@@ -221,7 +218,6 @@ class Trainer:
                             atomic_numbers=val_batch['Z'], 
                             positions=val_batch['R'], 
                             atom_mask=val_batch['AM'], 
-                            neighbors=val_batch['N'], 
                             neighbor_mask=val_batch['NM'],
                             distances=val_batch['D'],
                             distance_vectors=val_batch['V'],
@@ -232,7 +228,6 @@ class Trainer:
                                 atomic_numbers=val_batch['Z'], 
                                 positions=val_batch['R'], 
                                 atom_mask=val_batch['AM'], 
-                                neighbors=val_batch['N'], 
                                 neighbor_mask=val_batch['NM'],
                                 distances=val_batch['D'],
                                 distance_vectors=val_batch['V'],
@@ -282,7 +277,6 @@ class Trainer:
                             atomic_numbers=test_batch['Z'], 
                             positions=test_batch['R'], 
                             atom_mask=test_batch['AM'], 
-                            neighbors=test_batch['N'], 
                             neighbor_mask=test_batch['NM'],
                             distances=test_batch['D'],
                             distance_vectors=test_batch['V'],
@@ -293,7 +287,6 @@ class Trainer:
                                 atomic_numbers=test_batch['Z'], 
                                 positions=test_batch['R'], 
                                 atom_mask=test_batch['AM'], 
-                                neighbors=test_batch['N'], 
                                 neighbor_mask=test_batch['NM'],
                                 distances=test_batch['D'],
                                 distance_vectors=test_batch['V'],

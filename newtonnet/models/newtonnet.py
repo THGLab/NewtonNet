@@ -73,8 +73,8 @@ class NewtonNet(nn.Module):
             n_layers: int = 3,
             dropout: float = 0.0,
             embedded_atomic_numbers: torch.Tensor = torch.tensor([1, 6, 7, 8]),
-            cutoff: float = 5.0,
-            cutoff_network: nn.Module = PolynomialCutoff(),
+            shell: nn.Module = None,
+            cutoff_network: nn.Module = None,
             normalizers: nn.ModuleDict = {},
             train_normalizer: bool = False,
             requires_dr: bool = False,
@@ -105,13 +105,11 @@ class NewtonNet(nn.Module):
                 self.node_embedding.weight.data[z] = torch.nan
 
         # edge embedding
-        shell_cutoff = cutoff
-        if period_boundary:
-            # make the cutoff here a little bit larger so that it can be handled with differentiable cutoff layer in interaction block
-            shell_cutoff = cutoff * 1.1
-        self.shell = ShellProvider(periodic_boundary=period_boundary, cutoff=shell_cutoff)
-        self.edge_embedding = RadialBesselLayer(n_basis, cutoff, device=device)
+        assert shell is not None, 'shell is not defined'
+        self.shell = shell
+        self.edge_embedding = RadialBesselLayer(n_basis, shell.cutoff, device=device)
         self.epsilon = 1.0e-8
+        self.cutoff_network = cutoff_network or PolynomialCutoff(cutoff=shell.cutoff)
 
         # message passing
         self.n_interactions = n_layers
@@ -122,6 +120,7 @@ class NewtonNet(nn.Module):
                     n_features=n_features,
                     n_basis=n_basis,
                     activation=activation,
+                    shell=shell,
                     cutoff_network=cutoff_network,
                     double_update_latent=double_update_latent,
                     layer_norm=layer_norm,
@@ -134,6 +133,7 @@ class NewtonNet(nn.Module):
                     n_features=n_features,
                     n_basis=n_basis,
                     activation=activation,
+                    shell=shell,
                     cutoff_network=cutoff_network,
                     double_update_latent=double_update_latent,
                     layer_norm=layer_norm,
@@ -158,11 +158,9 @@ class NewtonNet(nn.Module):
             atomic_numbers: torch.Tensor,
             positions: torch.Tensor,
             atom_mask: torch.Tensor,
-            neighbors: torch.Tensor,
             neighbor_mask: torch.Tensor,
             distances: torch.Tensor,
             distance_vectors: torch.Tensor,
-            lattice: torch.Tensor = torch.eye(3),
             ):
 
         # initiate main containers
@@ -175,8 +173,8 @@ class NewtonNet(nn.Module):
         # recompute distances (B,A,N) and distance vectors (B,A,N,3)
         if self.requires_dr:
             positions.requires_grad_()
-            distances, distance_vectors, neighbors, neighbor_mask = self.shell(positions, neighbors, neighbor_mask, lattice)
-            distance_vectors = distance_vectors / (distances[:, :, :, None] + self.epsilon)
+            distances, distance_vectors, neighbor_mask = self.shell(positions, neighbor_mask)
+            distance_vectors = distance_vectors / (distances.unsqueeze(-1) + self.epsilon)
 
         # comput d1 representation (B, A, N, G)
         invariant_edges = self.edge_embedding(distances)
@@ -189,7 +187,6 @@ class NewtonNet(nn.Module):
                 invariant_edges, 
                 distances, 
                 distance_vectors, 
-                neighbors, 
                 neighbor_mask, 
                 equivariant_node_F, 
                 equivariant_node_f, 
@@ -201,7 +198,7 @@ class NewtonNet(nn.Module):
         Ei = self.invariant_node_property(invariant_node)
 
         # inverse normalize
-        Ei = Ei * atom_mask[:, :, None]  # (B,A,1)
+        Ei = Ei * atom_mask.unsqueeze(-1)  # (B,A,1)
         E = self.aggregration(Ei, dim=1)  # (B,1)
         outputs['E_normalized'] = E
         E = self.normalizers['E'].reverse(E, atomic_numbers)
@@ -244,7 +241,8 @@ class MessagePassingLayer(nn.Module):
             n_features: int = 128,
             n_basis: int = 20,
             activation: nn.Module = nn.SiLU(),
-            cutoff_network: nn.Module = PolynomialCutoff(),
+            shell: nn.Module = None,
+            cutoff_network: nn.Module = None,
             double_update_latent: bool = True,
             layer_norm: bool = False,
             ):
@@ -263,6 +261,9 @@ class MessagePassingLayer(nn.Module):
         )
 
         # cutoff layer used in interaction block
+        assert shell is not None, 'shell is not defined'
+        self.shell = shell
+        assert cutoff_network is not None, 'cutoff_network is not defined'
         self.cutoff_network = cutoff_network
 
         # directional message passing
@@ -298,39 +299,6 @@ class MessagePassingLayer(nn.Module):
         self.layer_norm = layer_norm
         if self.layer_norm:
             self.norm = nn.LayerNorm(n_features)
-
-    def gather_neighbors(self, inputs, neighbors):
-        n_features = inputs.shape[-1]
-        n_dim = inputs.dim()
-        batch_size, n_atoms, n_neighbors = neighbors.size()  # batch, atoms, neighbors size
-
-        if n_dim == 3:    # inputs: batch_size, n_atoms, n_features
-            neighbors = neighbors[:, :, :, None].expand(-1, -1, -1, n_features)    # batch_size, n_atoms, n_neighbors, n_features
-            inputs = inputs[:, :, None, :].expand(-1, -1, n_neighbors, -1)    # batch_size, n_atoms, n_neighbors, n_features
-            outputs = torch.gather(inputs, dim=1, index=neighbors)    # batch_size, n_atoms, n_neighbors, n_features
-            return outputs
-        elif n_dim == 4:    # inputs: batch_size, n_atoms, 3, n_features
-            neighbors = neighbors[:, :, :, None, None].expand(-1, -1, -1, 3, n_features)    # batch_size, n_atoms, n_neighbors, 3, n_features
-            inputs = inputs[:, :, None, :, :].expand(-1, -1, n_neighbors, -1, -1)    # batch_size, n_atoms, n_neighbors, 3, n_features
-            outputs = torch.gather(inputs, dim=1, index=neighbors)    # batch_size, n_atoms, n_neighbors, 3, n_features
-            return outputs
-        else:
-            raise ValueError(f'Unknown input dimension: {n_dim}')
-
-    def sum_neighbors(self, inputs, mask):
-        n_dim = inputs.dim()
-
-        if n_dim == 3:    # inputs: batch_size, n_atoms, n_neighbors
-            outputs = torch.sum(inputs * mask, dim=2)
-        elif n_dim == 4:    # inputs: batch_size, n_atoms, n_neighbors, n_features
-            mask = mask[:, :, :, None]
-            outputs = torch.sum(inputs * mask, dim=2)
-        elif n_dim == 5:    # inputs: batch_size, n_atoms, n_neighbors, 3, n_features
-            mask = mask[:, :, :, None, None]
-            outputs = torch.sum(inputs * mask, dim=2)
-        else:
-            raise ValueError(f'Unknown input dimension: {n_dim}')
-        return outputs
     
     def forward(
             self, 
@@ -338,7 +306,6 @@ class MessagePassingLayer(nn.Module):
             invariant_edge, 
             distances, 
             distance_vector, 
-            neighbors, 
             neighbor_mask,
             equivariant_node_F, 
             equivariant_node_f, 
@@ -349,37 +316,39 @@ class MessagePassingLayer(nn.Module):
         invariant_message_edge = self.invariant_message_edge(invariant_edge)    # batch_size, n_atoms, n_neighbors, n_features
 
         # cutoff
-        invariant_message_edge = invariant_message_edge * self.cutoff_network(distances)[:, :, :, None]    # batch_size, n_atoms, n_neighbors, n_features
+        invariant_message_edge = invariant_message_edge * self.cutoff_network(distances).unsqueeze(-1)    # batch_size, n_atoms, n_neighbors, n_features
 
         # map atomic features
         invariant_message_node = self.invariant_message_node(invariant_node)    # batch_size, n_atoms, n_features
 
         # # symmetric feature multiplication
-        invariant_message = invariant_message_edge * self.gather_neighbors(invariant_message_node, neighbors) * invariant_message_node[:, :, None, :]    # batch_size, n_atoms, n_neighbors, n_features
+        invariant_message_node_i, invariant_message_node_f = self.shell.gather_neighbors(invariant_message_node, neighbor_mask)    # batch_size, n_atoms, n_neighbors, n_features
+        invariant_message = invariant_message_edge * invariant_message_node_i * invariant_message_node_f    # batch_size, n_atoms, n_neighbors, n_features
 
         # update a with invariance
         if self.double_update_latent:
-            invariant_update = self.sum_neighbors(invariant_message, neighbor_mask)    # batch_size, n_atoms, n_features
+            invariant_update = (invariant_message * neighbor_mask.unsqueeze(-1)).sum(dim=2)    # batch_size, n_atoms, n_features
             invariant_node = invariant_node + invariant_update    # batch_size, n_atoms, n_features
 
         # F
         equivariant_message_F = self.equivariant_message_coefficient(invariant_message) * distance_vector  # batch_size, n_atoms, n_neighbors, 3
-        equivariant_update_F = self.sum_neighbors(equivariant_message_F, neighbor_mask)  # batch_size, n_atoms, 3
+        equivariant_update_F = (equivariant_message_F * neighbor_mask.unsqueeze(-1)).sum(dim=2)  # batch_size, n_atoms, 3
         equivariant_node_F = equivariant_node_F + equivariant_update_F
 
         # f
-        equivariant_message_f = self.equivariant_message_feature(invariant_message)[:, :, :, None, :] * equivariant_message_F[:, :, :, :, None]  # batch_size, n_atoms, n_neighbors, 3, n_features
-        equivariant_update_f = self.sum_neighbors(equivariant_message_f, neighbor_mask)  # batch_size, n_atoms, 3, n_features
+        equivariant_message_f = self.equivariant_message_feature(invariant_message).unsqueeze(-2) * equivariant_message_F.unsqueeze(-1)  # batch_size, n_atoms, n_neighbors, 3, n_features
+        equivariant_update_f = (equivariant_message_f * neighbor_mask.unsqueeze(-1).unsqueeze(-2)).sum(dim=2)  # batch_size, n_atoms, 3, n_features
         equivariant_node_f = equivariant_node_f + equivariant_update_f
         
         # dr
-        equivariant_message_dr_edge = self.equivariant_message_edge(invariant_message)[:, :, :, None, :]    # batch_size, n_atoms, n_neighbors, 3, n_features
-        equivariant_message_dr_node = equivariant_node_dr    # batch_size, n_atoms, 3, n_features
-        equivariant_message_dr = equivariant_message_dr_edge * self.gather_neighbors(equivariant_message_dr_node, neighbors)    # batch_size, n_atoms, n_neighbors, 3, n_features
-        equivariant_update_dr = self.sum_neighbors(equivariant_message_dr, neighbor_mask)  # batch_size, n_atoms, 3, n_features
+        equivariant_message_dr_edge = self.equivariant_message_edge(invariant_message).unsqueeze(-2)    # batch_size, n_atoms, n_neighbors, 3, n_features
+        equivariant_message_dr_node_i, equivariant_message_dr_node_f = self.shell.gather_neighbors(equivariant_node_dr, neighbor_mask)    # batch_size, n_atoms, 3, n_features
+        # print(equivariant_message_dr_node_f)
+        equivariant_message_dr = equivariant_message_dr_edge * equivariant_message_dr_node_f    # batch_size, n_atoms, n_neighbors, 3, n_features
+        equivariant_update_dr = (equivariant_message_dr * neighbor_mask.unsqueeze(-1).unsqueeze(-2)).sum(dim=2)  # batch_size, n_atoms, 3, n_features
         equivariant_node_dr = equivariant_node_dr + equivariant_update_dr    # batch_size, n_atoms, 3, n_features
 
-        equivariant_update_dr = self.equivariant_selfupdate_coefficient(invariant_node)[:, :, None, :] * equivariant_update_f    # batch_size, n_atoms, 3, n_features
+        equivariant_update_dr = self.equivariant_selfupdate_coefficient(invariant_node).unsqueeze(-2) * equivariant_update_f    # batch_size, n_atoms, 3, n_features
         equivariant_node_dr = equivariant_node_dr + equivariant_update_dr    # batch_size, n_atoms, 3, n_features
 
         # update energy
