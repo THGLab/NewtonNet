@@ -5,15 +5,12 @@ import argparse
 import yaml
 
 import torch
-from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 
 from newtonnet.models import NewtonNet
 from newtonnet.train import Trainer
 from newtonnet.data import parse_train_test
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
-from newtonnet.layers.aggregation import get_aggregation_by_string
 from newtonnet.train.loss import get_loss_by_string
 from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
 
@@ -24,10 +21,10 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument(
     '-c',
-    "--config",
+    '--config',
     type=str,
     required=True,
-    help="The path to the Yaml configuration file.")
+    help='The path to the Yaml configuration file.')
 
 # define arguments
 args = parser.parse_args()
@@ -51,7 +48,7 @@ train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell = pars
     train_path=settings['data'].get('train_path', None),
     val_path=settings['data'].get('val_path', None),
     test_path=settings['data'].get('test_path', None),
-    properties=settings['data'].get('properties', ['E', 'F']),
+    properties=settings['data'].get('properties', ['energy', 'forces']),
     cutoff=settings['data'].get('cutoff', 5.0),
     train_size=settings['data'].get('train_size', -1),
     val_size=settings['data'].get('val_size', -1),
@@ -59,42 +56,36 @@ train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell = pars
     train_batch_size=settings['training'].get('train_batch_size', 32),
     val_batch_size=settings['training'].get('val_batch_size', 32),
     test_batch_size=settings['training'].get('test_batch_size', 32),
-    periodic_boundary=settings['data'].get('periodic_boundary', False),
-    lattice=settings['data'].get('lattice', torch.eye(3, dtype=torch.float) * 10.0),
+    pbc=settings['data'].get('pbc', False),
+    cell=settings['data'].get('cell', torch.zeros(3, 3, dtype=torch.float)),
     device=device[0],
     )
 
 # model
-# activation function
-activation = get_activation_by_string(settings['model'].get('activation', 'swish'))
-cutoff_network = get_cutoff_by_string(settings['model'].get('cutoff_network', 'poly'), shell.cutoff)
-aggregation = get_aggregation_by_string(settings['model'].get('aggregation', 'sum'))
-
-model = NewtonNet(
-    n_basis=settings['model']['resolution'],
-    n_features=settings['model']['n_features'],
-    activation=activation,
-    n_layers=settings['model']['n_interactions'],
-    dropout=settings['training']['dropout'],
-    embedded_atomic_numbers=embedded_atomic_numbers,
-    cutoff_network=cutoff_network,
-    normalizers=normalizers,
-    train_normalizer=settings['model']['train_normalizer'],
-    requires_dr=settings['model']['requires_dr'],
-    shell=shell,
-    device=device[0],
-    create_graph=True,
-    share_layers=settings['model']['shared_interactions'],
-    return_hessian=settings['model']['return_hessian'],
-    double_update_latent=settings['model']['double_update_latent'],
-    layer_norm=settings['model']['layer_norm'],
-    aggregration=aggregation,
-    )
-
-# laod pre-trained model
 if settings['model']['pre_trained']:
     model_path = settings['model']['pre_trained']
-    model.load_state_dict(torch.load(model_path)['model_state_dict'])
+    model = torch.load(model_path, map_location=device[0])
+else:
+    activation = get_activation_by_string(settings['model'].get('activation', 'swish'))
+    cutoff_network = get_cutoff_by_string(settings['model'].get('cutoff_network', 'poly'), shell.cutoff)
+
+    model = NewtonNet(
+        n_basis=settings['model']['resolution'],
+        n_features=settings['model']['n_features'],
+        activation=activation,
+        n_interactions=settings['model']['n_interactions'],
+        dropout=settings['training']['dropout'],
+        embedded_atomic_numbers=embedded_atomic_numbers,
+        shell=shell,
+        cutoff_network=cutoff_network,
+        normalizers=normalizers,
+        train_normalizer=settings['model']['train_normalizer'],
+        device=device[0],
+        share_layers=settings['model']['shared_interactions'],
+        double_update_node=settings['model']['double_update_node'],
+        layer_norm=settings['model']['layer_norm'],
+        predictions=settings['model']['predictions'],
+        )
 
 # optimizer
 trainable_params = filter(lambda p: p.requires_grad, model.parameters())
@@ -119,11 +110,11 @@ trainer = Trainer(
     model=model,
     loss_fns=(main_loss, eval_loss),
     optimizer=optimizer,
-    requires_dr=settings['model']['requires_dr'],
     device=device,
     output_base_path=output_base_path,
     script_path=script_path,
     settings_path=settings_path,
+    resume_training=settings['training']['resume_training'],
     lr_scheduler=lr_scheduler,
     checkpoint_log=settings['checkpoint']['log'],
     checkpoint_val=settings['checkpoint']['val'],

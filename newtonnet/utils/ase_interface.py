@@ -86,15 +86,15 @@ class MLAseCalculator(Calculator):
         data = MolecularDataset(data)
         gen = DataLoader(dataset=data, batch_size=len(data), shuffle=False, drop_last=False)
         for data in gen:
-            data['R'] = data['R'].to(self.device[0])
-            data['Z'] = data['Z'].to(self.device[0])
-            data['AM'] = data['AM'].to(self.device[0])
-            data['NM'] = data['NM'].to(self.device[0])
-            data['D'] = data['D'].to(self.device[0])
-            data['V'] = data['V'].to(self.device[0])
+            data['positions'] = data['positions'].to(self.device[0])
+            data['atomic_numbers'] = data['atomic_numbers'].to(self.device[0])
+            data['atom_mask'] = data['atom_mask'].to(self.device[0])
+            data['neighbor_mask'] = data['neighbor_mask'].to(self.device[0])
+            data['distances'] = data['distances'].to(self.device[0])
+            data['distance_vectors'] = data['distance_vectors'].to(self.device[0])
             energy = np.zeros((len(self.models), 1))
-            forces = np.zeros((len(self.models), data['R'].shape[1], 3))
-            hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
+            forces = np.zeros((len(self.models), data['positions'].shape[1], 3))
+            hessian = np.zeros((len(self.models), data['positions'].shape[1], 3, data['positions'].shape[1], 3))
             if self.hess_method=='autograd':
                 for model_, model in enumerate(self.models):
                     #pred_E = lambda R: self.model(dict(data, R=R))
@@ -106,40 +106,64 @@ class MLAseCalculator(Calculator):
                     #energy = self.model(data).detach().cpu().numpy()
                     #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
                     #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
-                    energy[model_] = pred['E'].detach().cpu().numpy() * (kcal/mol)
-                    forces[model_] = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
-                    hessian[model_] = pred['H'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
+                    pred = model(
+                        atomic_numbers=data['atomic_numbers'], 
+                        positions=data['positions'], 
+                        atom_mask=data['atom_mask'], 
+                        neighbor_mask=data['neighbor_mask'], 
+                        distances=data['distances'], 
+                        distance_vectors=data['distance_vectors'])
+                    energy[model_] = pred['energy'].detach().cpu().numpy() * (kcal/mol)
+                    forces[model_] = pred['forces'].detach().cpu().numpy() * (kcal/mol/Ang)
+                    hessian[model_] = pred['hessian'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
                     del pred
             elif self.hess_method=='fwd_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
-                    energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
-                    forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
+                    pred = model(
+                        atomic_numbers=data['atomic_numbers'], 
+                        positions=data['positions'], 
+                        atom_mask=data['atom_mask'], 
+                        neighbor_mask=data['neighbor_mask'], 
+                        distances=data['distances'], 
+                        distance_vectors=data['distance_vectors'])
+                    energy[model_] = pred['energy'].detach().cpu().numpy()[0] * (kcal/mol)
+                    forces_temp = pred['forces'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
                     n = 1
-                    for A_ in range(data['R'].shape[1]):
+                    for A_ in range(data['positions'].shape[1]):
                         for X_ in range(3):
                             hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[0]) / self.hess_precision
                             n += 1
                     del pred
             elif self.hess_method=='cnt_diff':
                 for model_, model in enumerate(self.models):
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
-                    energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
-                    forces_temp = pred['F'].detach().cpu().numpy() * (kcal/mol/Ang)
+                    pred = model(
+                        atomic_numbers=data['atomic_numbers'], 
+                        positions=data['positions'], 
+                        atom_mask=data['atom_mask'], 
+                        neighbor_mask=data['neighbor_mask'], 
+                        distances=data['distances'], 
+                        distance_vectors=data['distance_vectors'])
+                    energy[model_] = pred['energy'].detach().cpu().numpy()[0] * (kcal/mol)
+                    forces_temp = pred['forces'].detach().cpu().numpy() * (kcal/mol/Ang)
                     forces[model_] = forces_temp[0]
                     n = 1
-                    for A_ in range(data['R'].shape[1]):
+                    for A_ in range(data['positions'].shape[1]):
                         for X_ in range(3):
                             hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[n+1]) / 2 / self.hess_precision
                             n += 2
                     del pred
             elif self.hess_method is None:
                 for model_, model in enumerate(self.models):
-                    pred = model(atomic_numbers=data['Z'], positions=data['R'], atom_mask=data['AM'], neighbor_mask=data['NM'], distances=data['D'], distance_vectors=data['V'])
-                    energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
-                    forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
+                    pred = model(
+                        atomic_numbers=data['atomic_numbers'], 
+                        positions=data['positions'], 
+                        atom_mask=data['atom_mask'], 
+                        neighbor_mask=data['neighbor_mask'], 
+                        distances=data['distances'], 
+                        distance_vectors=data['distance_vectors'])
+                    energy[model_] = pred['energy'].detach().cpu().numpy()[0] * (kcal/mol)
+                    forces[model_] = pred['forces'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
                     del pred
         # energy = np.zeros((len(self.models), 1))
         # forces = np.zeros((len(self.models), len(atoms), 3))
@@ -243,33 +267,33 @@ class MLAseCalculator(Calculator):
                 - 'F':forces
         """
         data  = {
-            'R': np.array(atoms.get_positions())[np.newaxis, ...], #shape(ndata,natoms,3)
-            'Z': np.array(atoms.get_atomic_numbers())[np.newaxis, ...], #shape(ndata,natoms)
-            'E': np.zeros((1,1)), #shape(ndata,1)
-            'F': np.zeros((1,len(atoms.get_atomic_numbers()), 3)),#shape(ndata,natoms,3)
+            'positions': np.array(atoms.get_positions())[np.newaxis, ...], #shape(ndata,natoms,3)
+            'atomic_numbers': np.array(atoms.get_atomic_numbers())[np.newaxis, ...], #shape(ndata,natoms)
+            'energy': np.zeros((1, 1)), #shape(ndata,1)
+            'forces': np.zeros((1, atoms.get_positions().size)), #shape(ndata,natoms*3)
         }
         if self.hess_method=='fwd_diff':
-            n = data['R'].size
-            data['R'] = np.tile(data['R'], (1 + n, 1, 1))
-            data['Z'] = np.tile(data['Z'], (1 + n, 1))
-            data['E'] = np.tile(data['E'], (1 + n, 1))
-            data['F'] = np.tile(data['F'], (1 + n, 1, 1))
+            n = data['positions'].size
+            data['positions'] = np.tile(data['positions'], (1 + n, 1, 1))
+            data['atomic_numbers'] = np.tile(data['atomic_numbers'], (1 + n, 1))
+            data['energy'] = np.tile(data['energy'], (1 + n, 1))
+            data['forces'] = np.tile(data['forces'], (1 + n, 1, 1))
             n = 1
-            for A_ in range(data['R'].shape[1]):
+            for A_ in range(data['positions'].shape[1]):
                 for X_ in range(3):
-                    data['R'][n, A_, X_] += self.hess_precision
+                    data['positions'][n, A_, X_] += self.hess_precision
                     n += 1
         if self.hess_method=='cnt_diff':
-            n = data['R'].size
-            data['R'] = np.tile(data['R'], (1 + 2*n, 1, 1))
-            data['Z'] = np.tile(data['Z'], (1 + 2*n, 1))
-            data['E'] = np.tile(data['E'], (1 + 2*n, 1))
-            data['F'] = np.tile(data['F'], (1 + 2*n, 1, 1))
+            n = data['positions'].size
+            data['positions'] = np.tile(data['positions'], (1 + 2*n, 1, 1))
+            data['atomic_numbers'] = np.tile(data['atomic_numbers'], (1 + 2*n, 1))
+            data['energy'] = np.tile(data['energy'], (1 + 2*n, 1))
+            data['forces'] = np.tile(data['forces'], (1 + 2*n, 1, 1))
             n = 1
-            for A_ in range(data['R'].shape[1]):
+            for A_ in range(data['positions'].shape[1]):
                 for X_ in range(3):
-                    data['R'][n, A_, X_] += self.hess_precision
-                    data['R'][n+1, A_, X_] -= self.hess_precision
+                    data['positions'][n, A_, X_] += self.hess_precision
+                    data['positions'][n+1, A_, X_] -= self.hess_precision
                     n += 2
         return data
 
