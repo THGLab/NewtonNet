@@ -15,42 +15,56 @@ from newtonnet.train.loss import get_loss_by_string
 
 
 class Trainer:
-    """
-    Parameters
-    ----------
-    """
+    '''
+    Trainer class for NewtonNet.
+
+    Parameters:
+        model (nn.Module): The model to train. Default: NewtonNet()
+        loss_fns (nn.Module, nn.Module): The loss functions to use for training and evaluation. Default: 'energy/force'
+        optimizer (optim.Optimizer): The optimizer to use for training. Default: Adam
+        lr_scheduler (optim.lr_scheduler._LRScheduler): The learning rate scheduler to use for training. Default: ReduceLROnPlateau
+        device (torch.device): The device to use for training. Default: cpu
+        output_base_path (str): The base path for the output directory.
+        script_path (str): The path to the script that was used to start the training.
+        settings_path (str): The path to the settings file that was used to start the training.
+        resume_training (str): The path to a checkpoint to resume training from. Default: False.
+        checkpoint_log (int): The interval in epochs for logging the training progress. Default: 1.
+        checkpoint_val (int): The interval in epochs for validation. Default: 1.
+        checkpoint_test (int): The interval in epochs for testing. Default: 10.
+        checkpoint_model (int): The interval in epochs for saving the model. Default: 1.
+        verbose (bool): Whether to print the training progress. Default: False.
+    '''
     def __init__(
             self,
             model: nn.Module = None,
             loss_fns: (nn.Module, nn.Module) = None,
             optimizer: optim.Optimizer = None,
             lr_scheduler: optim.lr_scheduler._LRScheduler = None,
-            requires_dr: bool = False,
-            device: torch.device = None,
+            device: torch.device = torch.device('cpu'),
             output_base_path: str = None,
             script_path: str = None,
             settings_path: str = None,
-            checkpoint_log=1,
-            checkpoint_val=1,
-            checkpoint_test=20,
-            checkpoint_model=1,
-            verbose=False,
+            resume_training: str = False,
+            checkpoint_log: int = 1,
+            checkpoint_val: int = 1,
+            checkpoint_test: int = 10,
+            checkpoint_model: int = 1,
+            verbose: bool = False,
             ):
         # training parameters
         self.model = model or NewtonNet()
+        self.print_layers()
         trainable_params = filter(lambda p: p.requires_grad, self.model.parameters())
         self.main_loss, self.eval_loss = loss_fns or get_loss_by_string('energy/force')
         self.optimizer = optimizer or optim.Adam(trainable_params)
         self.lr_scheduler = lr_scheduler or ReduceLROnPlateau(self.optimizer)
-        self.requires_dr = requires_dr
-        self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.best_val_loss = torch.inf
+        self.device = device
         self.multi_gpu = True if type(device) is list and len(device) > 1 else False
-        self.verbose = verbose
 
         # outputs
         self.make_subdirs(output_base_path, script_path, settings_path)
-        if self.verbose:
-            self.print_layers()
+        self.verbose = verbose
 
         # checkpoints
         self.check_log = checkpoint_log
@@ -59,7 +73,8 @@ class Trainer:
         self.check_model = checkpoint_model
 
         # checkpoints
-        self.best_val_loss = torch.inf
+        if resume_training:
+            self.resume_model(resume_training)
         self.log = pd.DataFrame()
         self.log['epoch'] = None
         for phase in ('train', 'val', 'test'):
@@ -70,6 +85,10 @@ class Trainer:
         self.log['time'] = None
 
     def make_subdirs(self, output_base_path, script_path, settings_path):
+        assert output_base_path is not None, 'output_base_path must be specified'
+        assert script_path is not None, 'script_path must be specified'
+        assert settings_path is not None, 'settings_path must be specified'
+
         # create output directory
         path_iter = 1
         output_path = os.path.join(output_base_path, f'training_{path_iter}')
@@ -141,11 +160,14 @@ class Trainer:
 
     def resume_model(self, path):
         checkpoint = torch.load(path)
+        self.checkpoint_epoch = checkpoint['epoch']
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.epoch = checkpoint['epoch']
-        loss = checkpoint['loss']
-        return loss
+        self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        self.best_val_loss = checkpoint['best_val_loss']
+
+        # set random seed to avoid repeating training epochs
+        torch.random.manual_seed(0)
 
     def train(
             self,
@@ -162,23 +184,26 @@ class Trainer:
 
         train_losses = {}
         for epoch in tqdm(range(epochs + 1)):
-            t0 = time.time()
+            # skip epochs if resuming training
+            if epoch <= self.checkpoint_epoch:
+                continue
 
             # training
+            t0 = time.time()
             train_losses['loss'] = 0.0
             self.model.train()
 
             for train_step, train_batch in enumerate(train_generator):
-                batch_size = train_batch['Z'].shape[0]
+                batch_size = train_batch['atomic_numbers'].shape[0]
 
                 self.optimizer.zero_grad()
                 preds = self.model(
-                    atomic_numbers=train_batch['Z'], 
-                    positions=train_batch['R'], 
-                    atom_mask=train_batch['AM'], 
-                    neighbor_mask=train_batch['NM'],
-                    distances=train_batch['D'],
-                    distance_vectors=train_batch['V'],
+                    atomic_numbers=train_batch['atomic_numbers'], 
+                    positions=train_batch['positions'], 
+                    atom_mask=train_batch['atom_mask'], 
+                    neighbor_mask=train_batch['neighbor_mask'],
+                    distances=train_batch['distances'],
+                    distance_vectors=train_batch['distance_vectors'],
                     )
                 main_loss = self.main_loss(preds, train_batch)
                 main_loss.backward()
@@ -211,26 +236,26 @@ class Trainer:
                 self.model.eval()
 
                 for val_step, val_batch in enumerate(val_generator):
-                    batch_size = val_batch['Z'].shape[0]
+                    batch_size = val_batch['atomic_numbers'].shape[0]
 
-                    if self.requires_dr:
+                    if self.model.requires_dr:
                         preds = self.model(
-                            atomic_numbers=val_batch['Z'], 
-                            positions=val_batch['R'], 
-                            atom_mask=val_batch['AM'], 
-                            neighbor_mask=val_batch['NM'],
-                            distances=val_batch['D'],
-                            distance_vectors=val_batch['V'],
+                            atomic_numbers=val_batch['atomic_numbers'], 
+                            positions=val_batch['positions'], 
+                            atom_mask=val_batch['atom_mask'], 
+                            neighbor_mask=val_batch['neighbor_mask'],
+                            distances=val_batch['distances'],
+                            distance_vectors=val_batch['distance_vectors'],
                             )
                     else:
                         with torch.no_grad():
                             preds = self.model(
-                                atomic_numbers=val_batch['Z'], 
-                                positions=val_batch['R'], 
-                                atom_mask=val_batch['AM'], 
-                                neighbor_mask=val_batch['NM'],
-                                distances=val_batch['D'],
-                                distance_vectors=val_batch['V'],
+                                atomic_numbers=val_batch['atomic_numbers'], 
+                                positions=val_batch['positions'], 
+                                atom_mask=val_batch['atom_mask'], 
+                                neighbor_mask=val_batch['neighbor_mask'],
+                                distances=val_batch['distances'],
+                                distance_vectors=val_batch['distance_vectors'],
                                 )
                     
                     main_loss = self.main_loss(preds, val_batch).detach().item()
@@ -247,7 +272,8 @@ class Trainer:
                 for key, value in val_losses.items():
                     val_losses[key] /= len(val_generator) if key == 'loss' else len(val_generator.dataset)
 
-                # best model
+            # best model
+            if epoch % self.check_model == 0:
                 if self.best_val_loss > val_losses['loss']:
                     self.best_val_loss = val_losses['loss']
                     if self.multi_gpu:
@@ -255,13 +281,6 @@ class Trainer:
                     else:
                         save_model = self.model
                     torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
-                    torch.save({
-                        'epoch': epoch,
-                        'model_state_dict': save_model.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict(),
-                        'loss': train_losses['loss'],
-                        }, os.path.join(self.model_path, 'best_model_state.tar')
-                    )
 
             # save test predictions
             test_losses = {}
@@ -270,26 +289,26 @@ class Trainer:
                 self.model.eval()
 
                 for test_step, test_batch in enumerate(test_generator):
-                    batch_size = test_batch['Z'].shape[0]
+                    batch_size = test_batch['atomic_numbers'].shape[0]
 
-                    if self.requires_dr:
+                    if self.model.requires_dr:
                         preds = self.model(
-                            atomic_numbers=test_batch['Z'], 
-                            positions=test_batch['R'], 
-                            atom_mask=test_batch['AM'], 
-                            neighbor_mask=test_batch['NM'],
-                            distances=test_batch['D'],
-                            distance_vectors=test_batch['V'],
+                            atomic_numbers=test_batch['atomic_numbers'], 
+                            positions=test_batch['positions'], 
+                            atom_mask=test_batch['atom_mask'], 
+                            neighbor_mask=test_batch['neighbor_mask'],
+                            distances=test_batch['distances'],
+                            distance_vectors=test_batch['distance_vectors'],
                             )
                     else:
                         with torch.no_grad():
                             preds = self.model(
-                                atomic_numbers=test_batch['Z'], 
-                                positions=test_batch['R'], 
-                                atom_mask=test_batch['AM'], 
-                                neighbor_mask=test_batch['NM'],
-                                distances=test_batch['D'],
-                                distance_vectors=test_batch['V'],
+                                atomic_numbers=test_batch['atomic_numbers'], 
+                                positions=test_batch['positions'], 
+                                atom_mask=test_batch['atom_mask'], 
+                                neighbor_mask=test_batch['neighbor_mask'],
+                                distances=test_batch['distances'],
+                                distance_vectors=test_batch['distance_vectors'],
                                 )
                     
                     main_loss = self.main_loss(preds, test_batch).detach().item()
@@ -306,6 +325,12 @@ class Trainer:
                 for key, value in test_losses.items():
                     test_losses[key] /= len(test_generator) if key == 'loss' else len(test_generator.dataset)
 
+            # learning rate decay
+            self.lr_scheduler.step(val_losses['loss'])
+
+            # # loss force weight decay
+            # self.main_loss.force_loss_decay()
+
             # checkpoint
             if epoch % self.check_log == 0:
                 self.plot_grad_flow(epoch)
@@ -320,9 +345,10 @@ class Trainer:
                 self.log.to_csv(os.path.join(self.output_path, 'log.csv'), index=False)
                 print(f'[{epoch}/{epochs}]', end=' ')
                 print(*[f'{key}: {value:.5f}' for key, value in checkpoint.items() if key != 'epoch'], sep=' - ')
-
-            # learning rate decay
-            self.lr_scheduler.step(val_losses['loss'])
-
-            # # loss force weight decay
-            # self.main_loss.force_loss_decay()
+                torch.save({
+                        'epoch': epoch,
+                        'model_state_dict': save_model.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'scheduler_state_dict': self.lr_scheduler.state_dict(),
+                        'best_val_loss': self.best_val_loss,
+                    }, os.path.join(self.model_path, 'train_state.tar'))

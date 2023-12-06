@@ -1,70 +1,57 @@
-"""
-A compilation of modules that help to find closest neighbours of each atom in a molecule.
-Each Molecule is represented as a dictionary with following keys:
-    - atoms: atomic positions with shape (n_atom, 3)
-    - z: atomic numbers with shape (n_atoms, 1)
-    - cell: unit cell with shape (3,3)
-    - atom_prop: atomic property with shape (n_atoms, n_atomic_prop)
-    - mol_prop: molecular property with shape (1, n_mol_prop)
-
-"""
 import torch
+
 from newtonnet.layers.shells import ShellProvider
 
-class NeighborEnvironment(object):
-    """
-    Provide atomic environment of an array of atoms and their atomic numbers.
 
-    """
+class NeighborEnvironment(object):
+    '''
+    This class finds atomic environments for each atom in the frame.
+
+    Parameters:
+        cutoff (float): The cutoff radius. Default: 5.0.
+        pbc (bool): Whether to use periodic boundary conditions. Default: False.
+        cell (torch.tensor): Unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], i.e. no periodic boundary.
+
+    Notes:
+        Sparse tensors are not yet supported.
+    '''
     def __init__(
             self, 
             cutoff: float = 5.0,
-            periodic_boundary: bool = False,
-            lattice: torch.Tensor = torch.eye(3) * 10.0,
+            pbc: bool = False,
+            cell: torch.Tensor = torch.zeros(3, 3, dtype=torch.float),
             ):
         self.cutoff = cutoff
-        self.shell = ShellProvider(cutoff=cutoff, periodic_boundary=periodic_boundary, lattice=lattice)
+        self.shell = ShellProvider(cutoff=cutoff, pbc=pbc, cell=cell)
 
-    def _check_shapes(self, Rshape, Zshape):
-        if Rshape[0] != Zshape[0]:
-            msg = "@ExtensiveEnvironment: atoms and atomic_numbers must have same dimension 0 (n_data)."
-            raise ValueError(msg)
+    def _check_shapes(self, positions, numbers):
+        assert positions.ndim == 3, 'positions must have 3 dimensions (n_data, n_atoms, 3).'
+        assert numbers.ndim == 2, 'numbers must have 2 dimensions (n_data, n_atoms).'
+        assert positions.shape[0] == numbers.shape[0], 'positions and numbers must have same dimension 0 (n_data).'
+        assert positions.shape[1] == numbers.shape[1], 'positions and numbers must have same dimension 1 (n_atoms).'
+        assert positions.shape[2] == 3, 'positions must have 3 coordinates at dimension 2 (x, y, z).'
 
-        if Rshape[2] != 3:
-            msg = "@ExtensiveEnvironment: atoms must have 3 coordinates at dimension 2."
-            raise ValueError(msg)
+    def get_environment(self, positions, numbers):
+        '''
+        This function finds atomic environments for each atom in the frame.
 
-        if Rshape[1] != Zshape[1]:
-            msg = "@ExtensiveEnvironment: atoms and atomic_numbers must have same dimension 1 (n_atoms)."
-            raise ValueError(msg)
+        Parameters:
+            positions (torch.tensor): The atomic positions with shape (n_data, n_atoms, 3).
+            numbers (torch.tensor): The atomic numbers with shape (n_data, n_atoms).
 
-    def get_environment(self, positions, atomic_numbers):
-        """
-        This function finds atomic environments extensively for each atom in the frame.
-
-        Parameters
-        ----------
-        positions: ndarray
-            A 3D array of atomic positions in XYZ coordinates with shape (D, A, 3), where
-            D is number of snapshots of data and A is number of atoms per data point
-
-        atomic_numbers: ndarray
-            A 2D array of atomic numbers with shape (D, A)
-
-        Returns
-        -------
-        ndarray: 3D array of neighbors with shape (D, A, A)
-        ndarray: 3D array of neighbor mask with shape (D, A, A)
-        ndarray: 2D array of atomic mask for atomic energies (D, A)
-
-        """
+        Returns:
+            distances (torch.tensor): The distances between atoms with shape (n_data, n_atoms, n_atoms).
+            distance_vectors (torch.tensor): The distance vectors between atoms with shape (n_data, n_atoms, n_atoms, 3).
+            atom_mask (torch.tensor): The mask for atoms with shape (n_data, n_atoms).
+            neighbor_mask (torch.tensor): The mask for neighbors with shape (n_data, n_atoms, n_atoms).
+        '''
     
         _, n_atoms, _ = positions.shape
 
-        self._check_shapes(positions.shape, atomic_numbers.shape)
+        self._check_shapes(positions, numbers)
 
         # mask based on zero atomic_numbers
-        atom_mask = (atomic_numbers > 0)  # data_size, n_atoms
+        atom_mask = (numbers > 0)  # data_size, n_atoms
 
         neighbor_mask = atom_mask.unsqueeze(1) * atom_mask.unsqueeze(2)  # data_size, n_atoms, n_atoms
         neighbor_mask[:, torch.arange(n_atoms), torch.arange(n_atoms)] = 0

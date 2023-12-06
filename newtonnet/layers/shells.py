@@ -1,133 +1,99 @@
 import torch
 from torch import nn
 
-class ShellProvider(nn.Module):
-    """
-    This layer calculates distance of each atom in a molecule to its
-    closest neighbouring atoms.
 
+class ShellProvider(nn.Module):
+    '''
+    This layer calculates distance of each atom in a molecule to its closest neighbouring atoms.
     Based on the SchnetPack AtomDistances: https://github.com/atomistic-machine-learning/schnetpack under the MIT License.
 
+    Parameters:
+        cutoff (float): The cutoff radius. Default: 5.0.
+        pbc (bool): Whether to use periodic boundary conditions. Default: False.
+        cell (torch.tensor): Unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], i.e. no periodic boundary.
 
-    Parameters
-    ----------
-
-    """
-
+    Notes:
+        Sparse tensors are not yet supported.
+    '''
     def __init__(
             self,
             cutoff: float = 5.0,
-            periodic_boundary: bool = False,
-            lattice: torch.Tensor = torch.eye(3) * 10.0,
+            pbc: bool = False,
+            cell: torch.Tensor = torch.zeros(3, 3, dtype=torch.float),
             ):
         super(ShellProvider, self).__init__()
         self.cutoff = cutoff
-        self.periodic_boundary = periodic_boundary
-        if self.periodic_boundary:
-            self.lattice = lattice
-            lattice_shift_vectors = torch.tensor(
+        self.pbc = pbc
+        if self.pbc:
+            self.cell = cell
+            cell_shift_vectors = torch.tensor(
                 [[[[i, j, k] for i in (-1, 0, 1)] for j in (-1, 0, 1)] for k in (-1, 0, 1)],
-                dtype=self.lattice.dtype,
-                device=self.lattice.device,
+                dtype=self.cell.dtype,
+                device=self.cell.device,
                 ).reshape((27, 3))    # 27, 3
-            self.shift_vectors = lattice_shift_vectors @ self.lattice    # 27, 3
-            self.orthorhombic = (lattice[0] @ lattice[1]) == (lattice[1] @ lattice[2]) == (lattice[2] @ lattice[0]) == 0.0    # cubic, tetragonal, or orthorhombic
+            self.shift_vectors = cell_shift_vectors @ self.cell    # 27, 3
+            self.orthorhombic = (cell[0] @ cell[1]) == (cell[1] @ cell[2]) == (cell[2] @ cell[0]) == 0.0    # cubic, tetragonal, or orthorhombic
 
-    # def gather_neighbors_sparse(self, inputs, neighbor_mask):
+    # def gather_neighbors_sparse(self, input, neighbor_mask):
         
     #     sparse_indices = neighbor_mask.indices()    # 3, n_atoms * n_neighbors
     #     sparse_shape = neighbor_mask.shape    # 3 (i.e. n_data, n_atoms, and n_neighbors)
     #     sparse_indices_extand = (sparse_indices.repeat_interleave(3, dim=1), torch.arange(3).repeat(1, sparse_indices.shape[1]))
     #     sparse_indices_extand = torch.cat(sparse_indices_extand, dim=0)    # 4, n_atoms * n_neighbors
-    #     inputs_i = torch.sparse_coo_tensor(
+    #     input_i = torch.sparse_coo_tensor(
     #         indices=sparse_indices_extand,
     #         values=inputs[sparse_indices[[0, 1], :].tolist()].flatten(),
     #         size=(*sparse_shape, 3),
     #         )
-    #     inputs_f = torch.sparse_coo_tensor(
+    #     input_f = torch.sparse_coo_tensor(
     #         indices=sparse_indices_extand,
     #         values=inputs[sparse_indices[[0, 2], :].tolist()].flatten(),
     #         size=(*sparse_shape, 3),
     #         )
 
-    #     return inputs_i, inputs_f
+    #     return input_i, input_f
 
-    def gather_neighbors(self, inputs, neighbor_mask):
-        """
-        Gather neighbor positions for each atom in a molecule.
+    def gather_neighbors(self, input, neighbor_mask):
+        '''
+        Gather neighbor properties for each atom in a molecule.
 
-        Parameters
-        ----------
-        inputs: torch.Tensor
-            XYZ coordinates of atoms in molecules.
-            shape: (B, A, 3)
+        Args:
+            input (torch.tensor): The properties of atoms in molecules with shape (n_data, n_atoms, *n_properties).
+            neighbor_mask (torch.tensor): The mask for neighbors with shape (n_data, n_atoms, n_atoms).
 
-        neighbor_mask: torch.Tensor
-            boolean mask for neighbor positions.
-            shape: (B, A, N), for small systems N=A-1
-
-        Returns
-        -------
-        torch.Tensor: positions of central atoms with shape: (B, A, 1, 3)
-        torch.Tensor: positions of neighboring atoms with shape: (B, A, N, 3)
-
-        Notes
-        -----
-        shape of tensors are specified with following symbols throughout the documentation:
-            - B: batch size
-            - A: max number of atoms
-            - N: max number of neighbors (upper limit is A-1)
-
-        """
-        # Get atomic positions of all neighboring indices
-        while inputs.dim() + 1 > neighbor_mask.dim():
+        Returns:
+            input_i (torch.tensor): The properties of central atoms with shape (n_data, n_atoms, n_atoms, *n_properties).
+            input_f (torch.tensor): The properties of neighboring atoms with shape (n_data, n_atoms, n_atoms, *n_properties).
+        '''
+        # Expand neighbor mask to match the shape of input properties
+        while input.dim() + 1 > neighbor_mask.dim():
             neighbor_mask = neighbor_mask.unsqueeze(-1)
-        inputs_i = inputs.unsqueeze(2)    # data_size, n_atoms, 1, ...
-        inputs_i = inputs_i * neighbor_mask    # data_size, n_atoms, n_atoms, ...
-        inputs_f = inputs.unsqueeze(1)    # data_size, 1, n_atoms, ...
-        inputs_f = inputs_f * neighbor_mask    # data_size, n_atoms, n_atoms, ...
 
-        return inputs_i, inputs_f
+        # Expand inputs for neighbor dimension
+        input_i = input.unsqueeze(2)    # data_size, n_atoms, 1, ...
+        input_i = input_i * neighbor_mask    # data_size, n_atoms, n_atoms, ...
+        input_f = input.unsqueeze(1)    # data_size, 1, n_atoms, ...
+        input_f = input_f * neighbor_mask    # data_size, n_atoms, n_atoms, ...
+
+        return input_i, input_f
 
     def forward(
             self,
             positions: torch.Tensor,
             neighbor_mask: torch.Tensor,
             ):
-        """
+        '''
         The main driver to calculate distances of atoms in a shell from center atom.
 
-        Parameters
-        ----------
-        positions: torch.Tensor
-            XYZ coordinates of atoms in molecules.
-            shape: (B, A, 3)
+        Args:
+            positions (torch.Tensor): The atomic positions with shape (n_data, n_atoms, 3).
+            neighbor_mask (torch.Tensor): The mask for neighbors with shape (n_data, n_atoms, n_atoms).
 
-        neighbors: torch.Tensor
-            indices of adjacent atoms.
-            shape: (B, A, N), for small systems N=A-1
-
-        neighbor_mask: torch.tensor
-            boolean mask for neighbor positions.
-
-        lattice: torch.Tensor or None
-            the pbc lattice array for current batch of data
-            shape: (9,)
-
-
-        Returns
-        -------
-        torch.Tensor: distances with shape: (B, A, N)
-        torch.Tensor: distance vector with shape: (B, A, N, 3)
-
-        Notes
-        -----
-        shape of tensors are specified with following symbols throughout the documentation:
-            - B: batch size
-            - A: max number of atoms
-            - N: max number of neighbors (upper limit is A-1)
-
-        """
+        Returns:
+            distances (torch.Tensor): The distances between atoms with shape (n_data, n_atoms, n_atoms).
+            distance_vectors (torch.Tensor): The distance vectors between atoms with shape (n_data, n_atoms, n_atoms, 3).
+            neighbor_mask (torch.Tensor): The mask for neighbors with shape (n_data, n_atoms, n_atoms).
+        '''
         if neighbor_mask.is_sparse:
             # # Get atomic positions of all neighboring indices
             # neighbor_mask = neighbor_mask.coalesce()
@@ -158,7 +124,7 @@ class ShellProvider(nn.Module):
             distance_vectors = positions_f - positions_i    # data_size, n_atoms, n_atoms, 3
 
             # Calculate distances
-            if self.periodic_boundary:
+            if self.pbc:
                 distance_vectors = distance_vectors.unsqueeze(-2) + self.shift_vectors.unsqueeze(0).unsqueeze(1).unsqueeze(2)    # data_size, n_atoms, n_atoms, 27, 3
                 distances = distance_vectors.norm(dim=-1)    # data_size, n_atoms, n_atoms, 27
                 distances_min_index = torch.argmin(distances, dim=-1)    # data_size, n_atoms, n_atoms

@@ -2,7 +2,7 @@ import torch
 
 
 def get_aggregation_by_string(key):
-    if key == "sum":
+    if key == 'sum':
         aggregation = torch.sum
     elif key == 'mean':
         aggregation = torch.mean

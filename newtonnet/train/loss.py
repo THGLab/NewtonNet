@@ -19,18 +19,18 @@ def get_loss_by_string(**kwargs):
     if mode == 'energy/force':
         main_losses = []
         if kwargs.get('w_energy', 0.0) > 0.0:
-            main_losses.append(ScalarLoss('E_normalized', mode='mse', masked=False, weight=kwargs['w_energy']))
+            main_losses.append(ScalarLoss('energy_normalized', mode='mse', masked=False, weight=kwargs['w_energy']))
         if kwargs.get('w_force', 0.0) > 0.0:
-            main_losses.append(VectorLoss('F_normalized', mode='mse', masked=False, weight=kwargs['w_force']))
+            main_losses.append(VectorLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_force']))
         if kwargs.get('w_f_mag', 0.0) > 0.0:
-            main_losses.append(VectorNormLoss('F_normalized', mode='mse', masked=False, weight=kwargs['w_f_mag']))
+            main_losses.append(VectorNormLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_f_mag']))
         if kwargs.get('w_f_dir', 0.0) > 0.0:
-            main_losses.append(VectorCosLoss('F_normalized', mode='mse', masked=False, weight=kwargs['w_f_dir']))
+            main_losses.append(VectorCosLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_f_dir']))
         main_loss = MultitaskLoss(mode=mode, loss_fns=main_losses, sum=True)
 
         eval_losses = []
-        eval_losses.append(ScalarLoss('E', mode='mae', masked=False, weight=1.0))
-        eval_losses.append(VectorLoss('F', mode='mae', masked=True, weight=1.0))
+        eval_losses.append(ScalarLoss('energy', mode='mae', masked=False, weight=1.0))
+        eval_losses.append(VectorLoss('forces', mode='mae', masked=True, weight=1.0))
         eval_loss = MultitaskLoss(mode=mode, loss_fns=eval_losses, sum=False)
     else:
         raise ValueError(f'loss {mode} not implemented')
@@ -67,7 +67,7 @@ class ScalarLoss(BaseLoss):
 
     def forward(self, pred, data):
         if self.masked:
-            loss = self.loss_fn(pred[self.key] * data['AM'], data[self.key] * data['AM']) * data['AM'].numel() / data['AM'].sum()
+            loss = self.loss_fn(pred[self.key] * data['atom_mask'], data[self.key] * data['atom_mask']) * data['atom_mask'].numel() / data['atom_mask'].sum()
             return self.weight * loss
         else:
             loss = self.loss_fn(pred[self.key], data[self.key])
@@ -80,7 +80,7 @@ class VectorLoss(BaseLoss):
 
     def forward(self, pred, data):
         if self.masked:
-            loss = self.loss_fn(pred[self.key] * data['AM'][:, :, None], data[self.key] * data['AM'][:, :, None]) * data['AM'].numel() / data['AM'].sum()
+            loss = self.loss_fn(pred[self.key] * data['atom_mask'][:, :, None], data[self.key] * data['atom_mask'][:, :, None]) * data['atom_mask'].numel() / data['atom_mask'].sum()
             return self.weight * loss
         else:
             loss = self.loss_fn(pred[self.key], data[self.key])
@@ -93,7 +93,7 @@ class VectorNormLoss(BaseLoss):
 
     def forward(self, pred, data):
         if self.masked:
-            loss = self.loss_fn(pred[self.key].norm(dim=-1) * data['AM'], data[self.key].norm(dim=-1) * data['AM']) * data['AM'].numel() / data['AM'].sum()
+            loss = self.loss_fn(pred[self.key].norm(dim=-1) * data['atom_mask'], data[self.key].norm(dim=-1) * data['atom_mask']) * data['atom_mask'].numel() / data['atom_mask'].sum()
             return self.weight * loss
         else:
             loss = self.loss_fn(pred[self.key], data[self.key])
@@ -108,7 +108,7 @@ class VectorCosLoss(BaseLoss):
     def forward(self, pred, data):
         n_data, n_atoms, _ = data[self.key].shape
         if self.masked:
-            loss = self.loss_fn(self.cos(pred[self.key], data[self.key]) * data['AM'], torch.ones(n_data, n_atoms, dtype=torch.float, device=pred[self.key].device)) * data['AM'].numel() / data['AM'].sum()
+            loss = self.loss_fn(self.cos(pred[self.key], data[self.key]) * data['atom_mask'], torch.ones(n_data, n_atoms, dtype=torch.float, device=pred[self.key].device)) * data['atom_mask'].numel() / data['atom_mask'].sum()
             return self.weight * loss
         else:
             loss = self.loss_fn(self.cos(pred[self.key], data[self.key]), torch.ones(n_data, n_atoms, dtype=torch.float, device=pred[self.key].device))

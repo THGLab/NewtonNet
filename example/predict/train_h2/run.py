@@ -32,7 +32,7 @@ activation = get_activation_by_string(settings['model']['activation'])
 model = NewtonNet(n_basis=settings['model']['resolution'],
                n_features=settings['model']['n_features'],
                activation=activation,
-               n_layers=settings['model']['n_interactions'],
+               n_interactions=settings['model']['n_interactions'],
                dropout=settings['training']['dropout'],
                max_z=10,
                cutoff=settings['data']['cutoff'],  ## data cutoff
@@ -44,7 +44,7 @@ model = NewtonNet(n_basis=settings['model']['resolution'],
                create_graph=True,
                share_layers=settings['model']['shared_interactions'],
                return_latent=settings['model']['return_latent'],
-               double_update_latent=settings['model']['double_update_latent'],
+               double_update_node=settings['model']['double_update_latent'],
                layer_norm=settings['model']['layer_norm'],
                aggregration=settings['model']['aggregration']
                )
