@@ -31,7 +31,7 @@ class Trainer:
         checkpoint_log (int): The interval in epochs for logging the training progress. Default: 1.
         checkpoint_val (int): The interval in epochs for validation. Default: 1.
         checkpoint_test (int): The interval in epochs for testing. Default: 10.
-        checkpoint_model (int): The interval in epochs for saving the model. Default: 1.
+        checkpoint_model (int): The interval in epochs for saving the model (must be validated first). Default: 1.
         verbose (bool): Whether to print the training progress. Default: False.
     '''
     def __init__(
@@ -74,15 +74,23 @@ class Trainer:
 
         # checkpoints
         if resume_training:
-            self.resume_model(resume_training)
-        self.log = pd.DataFrame()
-        self.log['epoch'] = None
-        for phase in ('train', 'val', 'test'):
-            self.log[f'{phase}_loss'] = None
-            for loss_fn in self.eval_loss.loss_fns:
-                self.log[f'{phase}_{loss_fn.name}'] = None
-        self.log['lr'] = None
-        self.log['time'] = None
+            checkpoint = torch.load(os.path.join(resume_training, 'models/train_state.tar'))
+            self.epoch = checkpoint['epoch']
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            self.best_val_loss = checkpoint['best_val_loss']
+            self.log = pd.read_csv(os.path.join(resume_training, 'log.csv'))
+        else:
+            self.epoch = -1
+            self.log = pd.DataFrame()
+            self.log['epoch'] = None
+            for phase in ('train', 'val', 'test'):
+                self.log[f'{phase}_loss'] = None
+                for loss_fn in self.eval_loss.loss_fns:
+                    self.log[f'{phase}_{loss_fn.name}'] = None
+            self.log['lr'] = None
+            self.log['time'] = None
 
     def make_subdirs(self, output_base_path, script_path, settings_path):
         assert output_base_path is not None, 'output_base_path must be specified'
@@ -158,17 +166,6 @@ class Trainer:
         plt.savefig(os.path.join(self.graph_path, f'grad_flow_{epoch}.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
-    def resume_model(self, path):
-        checkpoint = torch.load(path)
-        self.checkpoint_epoch = checkpoint['epoch']
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        self.best_val_loss = checkpoint['best_val_loss']
-
-        # set random seed to avoid repeating training epochs
-        torch.random.manual_seed(0)
-
     def train(
             self,
             train_generator,
@@ -185,7 +182,15 @@ class Trainer:
         train_losses = {}
         for epoch in tqdm(range(epochs + 1)):
             # skip epochs if resuming training
-            if epoch <= self.checkpoint_epoch:
+            if epoch <= self.epoch:
+                for train_step, train_batch in enumerate(train_generator):
+                    pass
+                if epoch % self.check_val == 0:
+                    for val_step, val_batch in enumerate(val_generator):
+                        pass
+                if epoch % self.check_test == 0:
+                    for test_step, test_batch in enumerate(test_generator):
+                        pass
                 continue
 
             # training
@@ -272,20 +277,23 @@ class Trainer:
                 for key, value in val_losses.items():
                     val_losses[key] /= len(val_generator) if key == 'loss' else len(val_generator.dataset)
 
-            # best model
-            if epoch % self.check_model == 0:
-                if self.best_val_loss > val_losses['loss']:
-                    self.best_val_loss = val_losses['loss']
-                    if self.multi_gpu:
-                        save_model = self.model.module
-                    else:
-                        save_model = self.model
-                    torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
+                # best model
+                if epoch % self.check_model == 0:
+                    if self.best_val_loss > val_losses['loss']:
+                        self.best_val_loss = val_losses['loss']
+                        if self.multi_gpu:
+                            save_model = self.model.module
+                        else:
+                            save_model = self.model
+                        torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
+
+                # learning rate decay
+                self.lr_scheduler.step(val_losses['loss'])
 
             # save test predictions
             test_losses = {}
+            test_losses['loss'] = 0.0
             if epoch % self.check_test == 0:
-                test_losses['loss'] = 0.0
                 self.model.eval()
 
                 for test_step, test_batch in enumerate(test_generator):
@@ -325,9 +333,6 @@ class Trainer:
                 for key, value in test_losses.items():
                     test_losses[key] /= len(test_generator) if key == 'loss' else len(test_generator.dataset)
 
-            # learning rate decay
-            self.lr_scheduler.step(val_losses['loss'])
-
             # # loss force weight decay
             # self.main_loss.force_loss_decay()
 
@@ -347,7 +352,7 @@ class Trainer:
                 print(*[f'{key}: {value:.5f}' for key, value in checkpoint.items() if key != 'epoch'], sep=' - ')
                 torch.save({
                         'epoch': epoch,
-                        'model_state_dict': save_model.state_dict(),
+                        'model_state_dict': self.model.state_dict(),
                         'optimizer_state_dict': self.optimizer.state_dict(),
                         'scheduler_state_dict': self.lr_scheduler.state_dict(),
                         'best_val_loss': self.best_val_loss,
