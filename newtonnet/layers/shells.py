@@ -19,7 +19,7 @@ class ShellProvider(nn.Module):
             self,
             cutoff: float = 5.0,
             pbc: bool = False,
-            cell: torch.Tensor = torch.zeros(3, 3, dtype=torch.float),
+            cell: torch.Tensor = torch.zeros(3, 3),
             ):
         super(ShellProvider, self).__init__()
         self.cutoff = cutoff
@@ -28,7 +28,6 @@ class ShellProvider(nn.Module):
             self.cell = cell
             cell_shift_vectors = torch.tensor(
                 [[[[i, j, k] for i in (-1, 0, 1)] for j in (-1, 0, 1)] for k in (-1, 0, 1)],
-                dtype=self.cell.dtype,
                 device=self.cell.device,
                 ).reshape((27, 3))    # 27, 3
             self.shift_vectors = cell_shift_vectors @ self.cell    # 27, 3

@@ -9,6 +9,7 @@ import torch
 from newtonnet.models import NewtonNet
 from newtonnet.train import Trainer
 from newtonnet.data import parse_train_test
+from newtonnet.layers.precision import set_precison_by_string
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.train.loss import get_loss_by_string
@@ -37,6 +38,7 @@ script_path = os.path.abspath(__file__)
 output_base_path = settings['general']['output']
 
 # device
+precision = set_precison_by_string(settings['general']['precision'])
 if type(settings['general']['device']) is list:
     device = [torch.device(item) for item in settings['general']['device']]
 else:
@@ -57,8 +59,9 @@ train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell = pars
     val_batch_size=settings['training'].get('val_batch_size', 32),
     test_batch_size=settings['training'].get('test_batch_size', 32),
     pbc=settings['data'].get('pbc', False),
-    cell=settings['data'].get('cell', torch.zeros(3, 3, dtype=torch.float)),
+    cell=settings['data'].get('cell', torch.zeros(3, 3)),
     device=device[0],
+    precision=precision,
     )
 
 # model

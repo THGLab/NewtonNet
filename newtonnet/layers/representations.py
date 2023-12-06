@@ -18,7 +18,7 @@ class RadialBesselLayer(nn.Module):
     ):
         super(RadialBesselLayer, self).__init__()
         self.inv_cutoff = 1 / cutoff
-        self.frequencies = nn.Parameter(torch.tensor(np.arange(1, n_radial + 1) * np.pi, device=device, dtype=torch.float), requires_grad=False)
+        self.frequencies = nn.Parameter(torch.arange(1, n_radial + 1, requires_grad=False, device=device) * torch.pi)
         self.epsilon = 1.0e-8
 
     def forward(self, distances):

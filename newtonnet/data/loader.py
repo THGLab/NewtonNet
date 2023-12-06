@@ -16,15 +16,15 @@ class MolecularDataset(Dataset):
         environment (NeighborEnvironment): The environment for the dataset. Default: NeighborEnvironment().
         device (torch.device): The device for the dataset. Default: torch.device('cpu').
     '''
-    def __init__(self, input, properties=['energy', 'forces'], environment=NeighborEnvironment(), device=torch.device('cpu')):
+    def __init__(self, input, properties=['energy', 'forces'], environment=NeighborEnvironment(), device=torch.device('cpu'), precision=torch.float32):
         self.properties = properties
         self._check_properties(input)
         self._check_shapes(input)
-        self.positions = torch.tensor(input['positions'], dtype=torch.float)
-        self.atomic_numbers = torch.tensor(input['atomic_numbers'], dtype=torch.long)
+        self.positions = torch.tensor(input['positions'], dtype=precision)
+        self.atomic_numbers = torch.tensor(input['atomic_numbers'], dtype=torch.int)
         self.distances, self.distance_vectors, self.atom_mask, self.neighbor_mask = environment.get_environment(self.positions, self.atomic_numbers)
         for property in self.properties:
-            setattr(self, property, torch.tensor(input[property], dtype=torch.float))
+            setattr(self, property, torch.tensor(input[property], dtype=precision))
         self.device = device
         self.normalized = False
 
