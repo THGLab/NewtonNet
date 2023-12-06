@@ -43,9 +43,10 @@ def parse_train_test(
         test_batch_size: int = 32,
         properties: list = ['energy', 'forces'],
         pbc: bool = False,
-        cell: torch.tensor = torch.zeros(3, 3, dtype=torch.float),
+        cell: torch.tensor = torch.zeros(3, 3),
         cutoff: float = 5.0,
         device: torch.device = torch.device('cpu'),
+        precision: torch.dtype = torch.float32,
         ):
     '''
     Parse the training, validation, and test data.
@@ -86,36 +87,36 @@ def parse_train_test(
     # load data
     if train_path == val_path == test_path:
         print('use training data for validation and test')
-        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
+        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device, precision=precision)
         train_data, val_data, test_data = split(train_data, (train_size, val_size, test_size))
     elif train_path == val_path:
         print('use training data for validation')
-        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
+        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device, precision=precision)
         train_data, val_data = split(train_data, (train_size, val_size, 0))
-        test_data = MolecularDataset(np.load(test_path), properties=properties, environment=environment, device=device)
+        test_data = MolecularDataset(np.load(test_path), properties=properties, environment=environment, device=device, precision=precision)
         _, _, test_data = split(test_data, (0, 0, test_size))
     elif train_path == test_path:
         print('use training data for test')
-        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
+        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device, precision=precision)
         train_data, _, test_data = split(train_data, (train_size, 0, test_size))
-        val_data = MolecularDataset(np.load(val_path), properties=properties, environment=environment, device=device)
+        val_data = MolecularDataset(np.load(val_path), properties=properties, environment=environment, device=device, precision=precision)
         _, val_data, _ = split(val_data, (0, val_size, 0))
     elif val_path == test_path:
         print('use validation data for test')
-        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
+        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device, precision=precision)
         train_data, _, _, = split(train_data, (train_size, 0, 0))
-        val_data = MolecularDataset(np.load(val_path), properties=properties, environment=environment, device=device)
+        val_data = MolecularDataset(np.load(val_path), properties=properties, environment=environment, device=device, precision=precision)
         _, val_data, test_data = split(val_data, (0, val_size, test_size))
     else:
         print('use separate training, validation, and test data')
-        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device)
+        train_data = MolecularDataset(np.load(train_path), properties=properties, environment=environment, device=device, precision=precision)
         train_data, _, _ = split(train_data, (train_size, 0, 0))
-        val_data = MolecularDataset(np.load(val_path), properties=properties, environment=environment, device=device)
+        val_data = MolecularDataset(np.load(val_path), properties=properties, environment=environment, device=device, precision=precision)
         _, val_data, _ = split(val_data, (0, val_size, 0))
-        test_data = MolecularDataset(np.load(test_path), properties=properties, environment=environment, device=device)
+        test_data = MolecularDataset(np.load(test_path), properties=properties, environment=environment, device=device, precision=precision)
         _, _, test_data = split(test_data, (0, 0, test_size))
     print(f'data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
-    
+
     # create data loader
     train_gen = DataLoader(
         dataset=train_data,
@@ -148,7 +149,7 @@ def parse_train_test(
             trainable=False,
             )
         normalizers[property] = normalizer
-        print(f'    {property} normalizer: mean {normalizer.mean.data.tolist()}, std {normalizer.std.data.tolist()}')
+        print(f'  {property} normalizer: mean {normalizer.mean.data.tolist()}, std {normalizer.std.data.tolist()}')
     normalizers = ModuleDict(normalizers)
     for data in [train_data, val_data, test_data]:
         data.dataset.normalize(normalizers)

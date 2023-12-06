@@ -18,19 +18,19 @@ class BatchRenorm(torch.nn.Module):
     ):
         super(BatchRenorm,self).__init__()
         self.register_buffer(
-            "running_mean", torch.zeros(num_features, dtype=torch.float)
+            "running_mean", torch.zeros(num_features)
         )
         self.register_buffer(
-            "running_std", torch.ones(num_features, dtype=torch.float)
+            "running_std", torch.ones(num_features)
         )
         self.register_buffer(
-            "num_batches_tracked", torch.tensor(0, dtype=torch.long)
+            "num_batches_tracked", torch.tensor(0, dtype=torch.int)
         )
         self.weight = torch.nn.Parameter(
-            torch.ones(num_features, dtype=torch.float)
+            torch.ones(num_features)
         )
         self.bias = torch.nn.Parameter(
-            torch.zeros(num_features, dtype=torch.float)
+            torch.zeros(num_features)
         )
         self.affine = affine
         self.eps = eps

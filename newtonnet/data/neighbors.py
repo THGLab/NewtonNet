@@ -19,7 +19,7 @@ class NeighborEnvironment(object):
             self, 
             cutoff: float = 5.0,
             pbc: bool = False,
-            cell: torch.Tensor = torch.zeros(3, 3, dtype=torch.float),
+            cell: torch.Tensor = torch.zeros(3, 3),
             ):
         self.cutoff = cutoff
         self.shell = ShellProvider(cutoff=cutoff, pbc=pbc, cell=cell)

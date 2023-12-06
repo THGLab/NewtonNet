@@ -108,10 +108,10 @@ class VectorCosLoss(BaseLoss):
     def forward(self, pred, data):
         n_data, n_atoms, _ = data[self.key].shape
         if self.masked:
-            loss = self.loss_fn(self.cos(pred[self.key], data[self.key]) * data['atom_mask'], torch.ones(n_data, n_atoms, dtype=torch.float, device=pred[self.key].device)) * data['atom_mask'].numel() / data['atom_mask'].sum()
+            loss = self.loss_fn(self.cos(pred[self.key], data[self.key]) * data['atom_mask'], torch.ones(n_data, n_atoms, device=pred[self.key].device)) * data['atom_mask'].numel() / data['atom_mask'].sum()
             return self.weight * loss
         else:
-            loss = self.loss_fn(self.cos(pred[self.key], data[self.key]), torch.ones(n_data, n_atoms, dtype=torch.float, device=pred[self.key].device))
+            loss = self.loss_fn(self.cos(pred[self.key], data[self.key]), torch.ones(n_data, n_atoms, device=pred[self.key].device))
             return self.weight * loss
 
 

@@ -211,9 +211,9 @@ class EmbeddingNet(nn.Module):
         # initialize node representations
         invariant_node = self.node_embedding(atomic_numbers)  # batch_size, n_atoms, n_features
         batch_size, n_atoms, n_features = invariant_node.shape
-        equivariant_node_F = torch.zeros((batch_size, n_atoms, 3), dtype=torch.float, device=positions.device)  # batch_size, n_atoms, 3
-        equivariant_node_f = torch.zeros((batch_size, n_atoms, 3, n_features), dtype=torch.float, device=positions.device)  # batch_size, n_atoms, 3, n_features
-        equivariant_node_dr = torch.zeros((batch_size, n_atoms, 3, n_features), dtype=torch.float, device=positions.device)  # batch_size, n_atoms, 3, n_features
+        equivariant_node_F = torch.zeros((batch_size, n_atoms, 3), device=positions.device)  # batch_size, n_atoms, 3
+        equivariant_node_f = torch.zeros((batch_size, n_atoms, 3, n_features), device=positions.device)  # batch_size, n_atoms, 3, n_features
+        equivariant_node_dr = torch.zeros((batch_size, n_atoms, 3, n_features), device=positions.device)  # batch_size, n_atoms, 3, n_features
 
         # recompute distances and distance vectors
         if self.requires_dr:
@@ -223,6 +223,7 @@ class EmbeddingNet(nn.Module):
 
         # initialize edge representations
         invariant_edge = self.edge_embedding(distances)
+
 
         return invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr, invariant_edge, distances, distance_vectors
 
