@@ -59,6 +59,7 @@ class NeighborEnvironment(object):
         # distances
         distances, distance_vectors, neighbor_mask = self.shell(positions, neighbor_mask)
         # atom_mask = atom_mask.to_sparse()
+        print(neighbor_mask.dtype)
 
         return distances, distance_vectors, atom_mask, neighbor_mask
     

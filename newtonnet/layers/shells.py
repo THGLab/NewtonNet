@@ -32,6 +32,7 @@ class ShellProvider(nn.Module):
                 ).reshape((27, 3))    # 27, 3
             self.shift_vectors = cell_shift_vectors @ self.cell    # 27, 3
             self.orthorhombic = (cell[0] @ cell[1]) == (cell[1] @ cell[2]) == (cell[2] @ cell[0]) == 0.0    # cubic, tetragonal, or orthorhombic
+        self.epsilon = 1.0e-8
 
     # def gather_neighbors_sparse(self, input, neighbor_mask):
         
@@ -125,12 +126,12 @@ class ShellProvider(nn.Module):
             # Calculate distances
             if self.pbc:
                 distance_vectors = distance_vectors.unsqueeze(-2) + self.shift_vectors.unsqueeze(0).unsqueeze(1).unsqueeze(2)    # data_size, n_atoms, n_atoms, 27, 3
-                distances = distance_vectors.norm(dim=-1)    # data_size, n_atoms, n_atoms, 27
+                distances = (distance_vectors + self.epsilon).norm(dim=-1)    # data_size, n_atoms, n_atoms, 27
                 distances_min_index = torch.argmin(distances, dim=-1)    # data_size, n_atoms, n_atoms
                 distance_vectors = torch.gather(distance_vectors, dim=-2, index=distances_min_index.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, 1, 1, 3)).squeeze(-2)    # data_size, n_atoms, n_atoms, 3
                 distances = torch.gather(distances, dim=-1, index=distances_min_index.unsqueeze(-1)).squeeze(-1)    # data_size, n_atoms, n_atoms
             else:
-                distances = distance_vectors.norm(dim=-1)
+                distances = (distance_vectors + self.epsilon).norm(dim=-1)    # data_size, n_atoms, n_atoms
 
             # mask based on cutoff
             if self.cutoff is not None:
