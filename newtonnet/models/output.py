@@ -3,9 +3,13 @@ from torch import nn
 from torch.autograd import grad
 
 from newtonnet.layers.aggregation import get_aggregation_by_string
+from newtonnet.layers.scalers import NullNormalizer
 
 
-def get_output_by_string(key, normalizer, **kwargs):
+def get_output_by_string(key, normalizer=None, **kwargs):
+    if normalizer is None:
+        print(f'no normalizer is provided for {key}, use null normalizer instead')
+        normalizer = NullNormalizer()
     if key == 'energy':
         output_layer = InvariantGraphProperty(
             aggregration='sum',
@@ -88,7 +92,7 @@ class InvariantGraphProperty(nn.Module):
         normalizer (nn.Module): The normalizer for the atomic properties.
         train_normalizer (bool): Whether the normalizers are trainable.
     '''
-    def __init__(self, n_features, activation, dropout, aggregration, normalizer, train_normalizer, **kwargs):
+    def __init__(self, n_features, activation, dropout, aggregration, normalizer, train_normalizer=False, **kwargs):
 
         super(InvariantGraphProperty, self).__init__()
         if dropout > 0.0:
@@ -134,7 +138,7 @@ class FirstDerivativeProperty(nn.Module):
         normalizer (nn.Module): The normalizer for the atomic properties.
         train_normalizer (bool): Whether the normalizers are trainable.
     '''
-    def __init__(self, dependent_property, independent_property, negate, normalizer, train_normalizer, **kwargs):
+    def __init__(self, dependent_property, independent_property, negate, normalizer, train_normalizer=False, **kwargs):
 
         super(FirstDerivativeProperty, self).__init__()
         self.dependent_property = dependent_property
@@ -144,6 +148,7 @@ class FirstDerivativeProperty(nn.Module):
         self.normalizer = normalizer
         if train_normalizer:
             self.normalizer.requires_grad_(True)
+        self.requires_dr = False
 
     def forward(self, atomic_numbers, **inputs):
         dependent_property = inputs[self.dependent_property]
@@ -153,7 +158,7 @@ class FirstDerivativeProperty(nn.Module):
             dependent_property, 
             independent_property, 
             grad_outputs=grad_outputs, 
-            create_graph=True, 
+            create_graph=self.requires_dr, 
             retain_graph=True,
             )[0]
         output_normalized = self.normalizer.forward(output, atomic_numbers)
@@ -173,7 +178,7 @@ class SecondDerivativeProperty(nn.Module):
         normalizer (nn.Module): The normalizer for the atomic properties.
         train_normalizer (bool): Whether the normalizers are trainable.
     '''
-    def __init__(self, dependent_property, independent_property, negate, normalizer, train_normalizer, **kwargs):
+    def __init__(self, dependent_property, independent_property, negate, normalizer, train_normalizer=False, **kwargs):
 
         super(SecondDerivativeProperty, self).__init__()
         self.dependent_property = dependent_property

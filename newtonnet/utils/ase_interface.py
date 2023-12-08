@@ -13,6 +13,7 @@ from newtonnet.layers.cutoff import CosineCutoff, PolynomialCutoff
 from newtonnet.layers.scalers import Normalizer
 from newtonnet.models import NewtonNet
 from newtonnet.data import MolecularDataset
+from newtonnet.models.output import get_output_by_string, FirstDerivativeProperty, SecondDerivativeProperty
 
 
 ##-------------------------------------
@@ -22,34 +23,27 @@ class MLAseCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, hess_method=None, hess_precision=None, disagreement='std', device='cpu', script=False, trace_n_atoms=False, **kwargs):
+    def __init__(
+            self, 
+            model_path: str,
+            properties: list = ['energy', 'forces'], 
+            disagreement: str = 'std',
+            device: str = 'cpu',
+            script: bool = False,
+            trace_n_atoms: int = 0,
+            **kwargs,
+            ):
         """
-        Constructor for MLAseCalculator
+        Constructor for MLAseCalculator for NewtonNet models
 
-        Parameters
-        ----------
-        model_path: str or list of str
-            path to the model. eg. '5k/models/best_model_state.tar'
-        settings_path: str or list of str
-            path to the .yml setting path. eg. '5k/run_scripts/config_h2.yml'
-        hess_method: str
-            method to calculate hessians. 
-            None: do not calculate hessian (default)
-            'autograd': automatic differentiation
-            'fwd_diff': forward difference
-            'cnt_diff': central difference
-        hess_precision: float
-            hessian gradient calculation precision for 'fwd_diff' and 'cnt_diff', ignored otherwise (default: None)
-        disagreement: str
-            method to calculate disagreement between models.
-            'std': standard deviation of all votes (default)
-            'std_outlierremoval': standard deviation with outlier removal
-            'range': range of all votes
-            'values': values of each vote
-            None: do not calculate disagreement
-        device: 
-            device to run model. eg. 'cpu', ['cuda:0', 'cuda:1']
-        kwargs
+        Parameters:
+            model_path (str): The path to the model.
+            settings_path (str): The path to the settings.
+            properties (list): The properties to be predicted. Default: ['energy', 'forces'].
+            disagreement (str): The type of disagreement to be calculated. Default: 'std'.
+            device (str): The device for the calculator. Default: 'cpu'.
+            script (bool): Whether to script the model. Default: False.
+            trace_n_atoms (int): The number of atoms to be traced. Default: 0.
         """
         Calculator.__init__(self, **kwargs)
 
@@ -57,252 +51,71 @@ class MLAseCalculator(Calculator):
             self.device = [torch.device(item) for item in device]
         else:
             self.device = [torch.device(device)]
+
+        self.models = []
+        self.properties = properties
+        self.dtype = None
+        if type(model_path) is not list:
+            model_path = [model_path]
+        for model in model_path:
+            model = torch.load(model, map_location=self.device[0])
+            for key in self.properties:
+                if key in model.output_layers.keys():
+                    continue
+                output_layer = get_output_by_string(key)
+                model.output_layers.update({key: output_layer})
+                if isinstance(output_layer, FirstDerivativeProperty):
+                    model.embedding_layer.requires_dr = True
+                if isinstance(output_layer, SecondDerivativeProperty):
+                    assert output_layer.dependent_property in model.output_layers.keys(), f'cannot find dependent property {output_layer.dependent_property}'
+                    model.output_layers[output_layer.dependent_property].requires_dr = True
+            self.dtype = next(model.named_parameters())[1].dtype
+            self.models.append(model)
+        
         self.script = script
         self.trace_n_atoms = trace_n_atoms
-
-        self.hess_method = hess_method
-        if self.hess_method == 'autograd':
-            self.return_hessian = True
-        elif self.hess_method == 'fwd_diff' or self.hess_method == 'cnt_diff':
-            self.return_hessian = False
-            self.hess_precision = hess_precision
-        else:
-            self.return_hessian = False
-
         self.disagreement = disagreement
-
-        # torch.set_default_tensor_type(torch.DoubleTensor)
-        if type(model_path) is list:
-            self.models = [torch.load(model_path_, map_location=self.device[0]) for model_path_ in model_path]
-            self.settings = [yaml.safe_load(open(settings_path_, 'r')) for settings_path_ in settings_path]
-        else:
-            self.models = [torch.load(model_path, map_location=self.device[0])]
-            self.settings = [yaml.safe_load(open(settings_path, 'r'))]
         
 
-    def calculate(self, atoms=None, properties=['energy','forces','hessian'], system_changes=None):
-        super().calculate(atoms, properties, system_changes)
-        data = self.data_formatter(atoms)
-        data = MolecularDataset(data)
-        gen = DataLoader(dataset=data, batch_size=len(data), shuffle=False, drop_last=False)
-        for data in gen:
-            data['positions'] = data['positions'].to(self.device[0])
-            data['atomic_numbers'] = data['atomic_numbers'].to(self.device[0])
-            data['atom_mask'] = data['atom_mask'].to(self.device[0])
-            data['neighbor_mask'] = data['neighbor_mask'].to(self.device[0])
-            data['distances'] = data['distances'].to(self.device[0])
-            data['distance_vectors'] = data['distance_vectors'].to(self.device[0])
-            energy = np.zeros((len(self.models), 1))
-            forces = np.zeros((len(self.models), data['positions'].shape[1], 3))
-            hessian = np.zeros((len(self.models), data['positions'].shape[1], 3, data['positions'].shape[1], 3))
-            if self.hess_method=='autograd':
-                for model_, model in enumerate(self.models):
-                    #pred_E = lambda R: self.model(dict(data, R=R))
-                    #pred_F = torch.func.jacrev(pred_E)
-                    #pred_H = torch.func.hessian(pred_E)
-                    #energy = pred_E(data['R'])
-                    #forces = -pred_F(data['R'])
-                    #hessian = pred_H(data['R'])
-                    #energy = self.model(data).detach().cpu().numpy()
-                    #forces = -F.jacobian(lambda R: self.model(dict(data, R=R)), data['R']).detach().cpu().numpy()
-                    #hessian = F.hessian(lambda R: self.model(dict(data, R=R), vectorize=True), data['R']).detach().cpu().numpy()
-                    pred = model(
-                        atomic_numbers=data['atomic_numbers'], 
-                        positions=data['positions'], 
-                        atom_mask=data['atom_mask'], 
-                        neighbor_mask=data['neighbor_mask'], 
-                        distances=data['distances'], 
-                        distance_vectors=data['distance_vectors'])
-                    energy[model_] = pred['energy'].detach().cpu().numpy() * (kcal/mol)
-                    forces[model_] = pred['forces'].detach().cpu().numpy() * (kcal/mol/Ang)
-                    hessian[model_] = pred['hessian'].detach().cpu().numpy() * (kcal/mol/Ang/Ang)
-                    del pred
-            elif self.hess_method=='fwd_diff':
-                for model_, model in enumerate(self.models):
-                    pred = model(
-                        atomic_numbers=data['atomic_numbers'], 
-                        positions=data['positions'], 
-                        atom_mask=data['atom_mask'], 
-                        neighbor_mask=data['neighbor_mask'], 
-                        distances=data['distances'], 
-                        distance_vectors=data['distance_vectors'])
-                    energy[model_] = pred['energy'].detach().cpu().numpy()[0] * (kcal/mol)
-                    forces_temp = pred['forces'].detach().cpu().numpy() * (kcal/mol/Ang)
-                    forces[model_] = forces_temp[0]
-                    n = 1
-                    for A_ in range(data['positions'].shape[1]):
-                        for X_ in range(3):
-                            hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[0]) / self.hess_precision
-                            n += 1
-                    del pred
-            elif self.hess_method=='cnt_diff':
-                for model_, model in enumerate(self.models):
-                    pred = model(
-                        atomic_numbers=data['atomic_numbers'], 
-                        positions=data['positions'], 
-                        atom_mask=data['atom_mask'], 
-                        neighbor_mask=data['neighbor_mask'], 
-                        distances=data['distances'], 
-                        distance_vectors=data['distance_vectors'])
-                    energy[model_] = pred['energy'].detach().cpu().numpy()[0] * (kcal/mol)
-                    forces_temp = pred['forces'].detach().cpu().numpy() * (kcal/mol/Ang)
-                    forces[model_] = forces_temp[0]
-                    n = 1
-                    for A_ in range(data['positions'].shape[1]):
-                        for X_ in range(3):
-                            hessian[model_, A_, X_, :, :] = -(forces_temp[n] - forces_temp[n+1]) / 2 / self.hess_precision
-                            n += 2
-                    del pred
-            elif self.hess_method is None:
-                for model_, model in enumerate(self.models):
-                    pred = model(
-                        atomic_numbers=data['atomic_numbers'], 
-                        positions=data['positions'], 
-                        atom_mask=data['atom_mask'], 
-                        neighbor_mask=data['neighbor_mask'], 
-                        distances=data['distances'], 
-                        distance_vectors=data['distance_vectors'])
-                    energy[model_] = pred['energy'].detach().cpu().numpy()[0] * (kcal/mol)
-                    forces[model_] = pred['forces'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
-                    del pred
-        # energy = np.zeros((len(self.models), 1))
-        # forces = np.zeros((len(self.models), len(atoms), 3))
-        # hessian = np.zeros((len(self.models), len(atoms), 3, len(atoms), 3))
-        # for model_, model in enumerate(self.models):
-        #     pred = model(
-        #         atomic_numbers=torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long, device=self.device[0])[None, ...], 
-        #         positions=torch.tensor(atoms.get_positions(), dtype=torch.float, device=self.device[0])[None, ...], 
-        #         atom_mask=torch.ones((1, len(atoms.get_atomic_numbers())), dtype=torch.long, device=self.device[0]), 
-        #         neighbors=torch.tensor(atoms.get_all_neighbors(self.settings), dtype=torch.long, device=self.device[0])[None, ...], 
-        #         neighbor_mask=torch.ones((1, len(atoms.get_atomic_numbers()), 6), dtype=torch.long, device=self.device[0]), 
-        #         distances=torch.tensor(atoms.get_all_distances(), dtype=torch.float, device=self.device[0])[None, ...], 
-        #         distance_vectors=torch.tensor(atoms.get_all_displacements(), dtype=torch.float, device=self.device[0])[None, ...],
-        #         )
-        #     energy[model_] = pred['E'].detach().cpu().numpy()[0] * (kcal/mol)
-        #     forces[model_] = pred['F'].detach().cpu().numpy()[0] * (kcal/mol/Ang)
-
-            self.results['outlier'] = self.q_test(energy)
-            self.results['energy'] = self.remove_outlier(energy, self.results['outlier']).mean()
-            self.results['forces'] = self.remove_outlier(forces, self.results['outlier']).mean(axis=0)
-            self.results['hessian'] = self.remove_outlier(hessian, self.results['outlier']).mean(axis=0)
-            if self.disagreement=='std':
-                self.results['energy_disagreement'] = energy.std()
-                self.results['forces_disagreement'] = forces.std(axis=0).max()
-                self.results['hessian_disagreement'] = hessian.std(axis=0).max()
-            elif self.disagreement=='std_outlierremoval':
-                self.results['energy_disagreement'] = self.remove_outlier(energy, self.results['outlier']).std()
-                self.results['forces_disagreement'] = self.remove_outlier(forces, self.results['outlier']).std(axis=0).max()
-                self.results['hessian_disagreement'] = self.remove_outlier(hessian, self.results['outlier']).std(axis=0).max()
-            elif self.disagreement=='range':
-                self.results['energy_disagreement'] = (energy.max() - energy.min())
-                self.results['forces_disagreement'] = (forces.max(axis=0) - forces.min(axis=0)).max()
-                self.results['hessian_disagreement'] = (hessian.max(axis=0) - hessian.min(axis=0)).max()
-            elif self.disagreement=='values':
-                self.results['energy_disagreement'] = energy
-                self.results['forces_disagreement'] = forces
-                self.results['hessian_disagreement'] = hessian
-            del energy, forces, hessian
-
-
-    # def load_model(self, model_path, settings_path):
-    #     settings = yaml.safe_load(open(settings_path, "r"))
-    #     activation = get_activation_by_string(settings['model']['activation'])
-    #     if settings['model']['cutoff_network'] == 'poly':
-    #         cutoff_network = PolynomialCutoff(cutoff=settings['data']['cutoff'])
-    #     elif settings['model']['cutoff_network'] == 'cos':
-    #         cutoff_network = CosineCutoff(cutoff=settings['data']['cutoff'])
-    #     model = NewtonNet(
-    #         n_basis=settings['model']['resolution'],
-    #         n_features=settings['model']['n_features'],
-    #         activation=activation,
-    #         n_layers=settings['model']['n_interactions'],
-    #         dropout=settings['training']['dropout'],
-    #         max_z=10,
-    #         cutoff=settings['data']['cutoff'],  ## data cutoff
-    #         cutoff_network=cutoff_network,
-    #         train_normalizer=settings['model']['train_normalizer'],
-    #         requires_dr=settings['model']['requires_dr'],
-    #         device=self.device[0],
-    #         create_graph=False,
-    #         share_layers=settings['model']['shared_interactions'],
-    #         return_hessian=self.return_hessian,
-    #         double_update_latent=settings['model']['double_update_latent'],
-    #         layer_norm=settings['model']['layer_norm'],
-    #         )
-
-    #     model = torch.load(model_path, map_location=self.device[0])
-    #     # model.to(self.device[0])
-    #     model.eval()
-
-    #     if self.script:
-    #         model = torch.jit.script(model)
-    #         model.save(model_path[:-4] + '_script.pt')
-    #     if self.trace_n_atoms:
-    #         model = torch.jit.trace(
-    #             model, (
-    #                 torch.ones((1, self.trace_n_atoms), dtype=torch.long), 
-    #                 torch.rand((1, self.trace_n_atoms, 3), dtype=torch.float), 
-    #                 torch.ones((1, self.trace_n_atoms), dtype=torch.long), 
-    #                 torch.tile(torch.arange(self.trace_n_atoms), (1, self.trace_n_atoms, 1)),
-    #                 1 - torch.eye(self.trace_n_atoms, dtype=torch.long)[None, :, :]))
-
-    #     return model
-    
-
-    def data_formatter(self, atoms):
-        """
-        convert ase.Atoms to input format of the model
-
-        Parameters
-        ----------
-        atoms: ase.Atoms
-
-        Returns
-        -------
-        data: dict
-            dictionary of arrays with following keys:
-                - 'R':positions
-                - 'Z':atomic_numbers
-                - 'E':energy
-                - 'F':forces
-        """
-        data  = {
-            'positions': np.array(atoms.get_positions())[np.newaxis, ...], #shape(ndata,natoms,3)
-            'atomic_numbers': np.array(atoms.get_atomic_numbers())[np.newaxis, ...], #shape(ndata,natoms)
-            'energy': np.zeros((1, 1)), #shape(ndata,1)
-            'forces': np.zeros((1, atoms.get_positions().size)), #shape(ndata,natoms*3)
+    def calculate(self, atoms=None, properties=['energy', 'forces'], system_changes=None):
+        super().calculate(atoms, self.properties, system_changes)
+        n_atoms = len(atoms)
+        data = {
+            'positions': torch.tensor(atoms.get_positions(), dtype=self.dtype).unsqueeze(0),    # n_data, n_atoms, 3
+            'atomic_numbers': torch.tensor(atoms.get_atomic_numbers(), dtype=torch.int).unsqueeze(0),    # n_data, n_atoms
+            'atom_mask': torch.ones((1, n_atoms), dtype=torch.bool),    # n_data, n_atoms
+            'neighbor_mask': (torch.ones((1, n_atoms, n_atoms)) - torch.eye(n_atoms).unsqueeze(0)).bool(),    # n_data, n_atoms, n_atoms
+            'distances': torch.tensor(atoms.get_all_distances(mic=True), dtype=self.dtype).unsqueeze(0),    # n_data, n_atoms, n_atoms
+            'distance_vectors': torch.tensor(atoms.get_all_distances(mic=True, vector=True), dtype=self.dtype).unsqueeze(0),    # n_data, n_atoms, n_atoms, 3
         }
-        if self.hess_method=='fwd_diff':
-            n = data['positions'].size
-            data['positions'] = np.tile(data['positions'], (1 + n, 1, 1))
-            data['atomic_numbers'] = np.tile(data['atomic_numbers'], (1 + n, 1))
-            data['energy'] = np.tile(data['energy'], (1 + n, 1))
-            data['forces'] = np.tile(data['forces'], (1 + n, 1, 1))
-            n = 1
-            for A_ in range(data['positions'].shape[1]):
-                for X_ in range(3):
-                    data['positions'][n, A_, X_] += self.hess_precision
-                    n += 1
-        if self.hess_method=='cnt_diff':
-            n = data['positions'].size
-            data['positions'] = np.tile(data['positions'], (1 + 2*n, 1, 1))
-            data['atomic_numbers'] = np.tile(data['atomic_numbers'], (1 + 2*n, 1))
-            data['energy'] = np.tile(data['energy'], (1 + 2*n, 1))
-            data['forces'] = np.tile(data['forces'], (1 + 2*n, 1, 1))
-            n = 1
-            for A_ in range(data['positions'].shape[1]):
-                for X_ in range(3):
-                    data['positions'][n, A_, X_] += self.hess_precision
-                    data['positions'][n+1, A_, X_] -= self.hess_precision
-                    n += 2
-        return data
+        preds = {key: [None for _ in self.models] for key in self.properties}
+        for model_, model in enumerate(self.models):
+            pred = model(
+                atomic_numbers=data['atomic_numbers'], 
+                positions=data['positions'], 
+                atom_mask=data['atom_mask'], 
+                neighbor_mask=data['neighbor_mask'], 
+                distances=data['distances'], 
+                distance_vectors=data['distance_vectors'])
+            for key in self.properties:
+                preds[key][model_] = pred[key].detach().cpu().numpy()
+            del pred
+        for key in self.properties:
+            preds[key] = np.concatenate(preds[key], axis=0)
 
+        self.results['outlier'] = self.q_test(preds['energy'])
+        for key in self.properties:
+            self.results[key] = self.remove_outlier(preds[key], self.results['outlier']).mean(axis=0)
 
-    # def extensive_data_loader(self, data, device=None):
-    #     batch = {'R': data['R'], 'Z': data['Z'], 'E': data['E'], 'F': data['F']}
-    #     batch = BatchDataset(batch)
-    #     return batch
-    
+            if self.disagreement == 'std':
+                self.results[key + '_disagreement'] = preds[key].std(axis=0).max()
+            elif self.disagreement == 'std_outlierremoval':
+                self.results[key + '_disagreement'] = self.remove_outlier(preds[key], self.results['outlier']).std(axis=0).max()
+            elif self.disagreement == 'range':
+                self.results[key + '_disagreement'] = (preds[key].max(axis=0) - preds[key].min(axis=0)).max()
+            elif self.disagreement == 'values':
+                self.results[key + '_disagreement'] = preds[key]
+            del preds[key]
 
     def remove_outlier(self, data, idx):
         if idx is None:
@@ -310,20 +123,16 @@ class MLAseCalculator(Calculator):
         else:
             return np.delete(data, idx, axis=0)
 
-
     def q_test(self, data):
-        """
+        '''
         Dixon's Q test for outlier detection
 
-        Parameters
-        ----------
-        data: 1d array with shape (nlearners,)
+        Parameters:
+            data (1d array): The data to be tested.
 
-        Returns
-        -------
-        idx: int or None
-            the index to be filtered out (return only one index for now as the default is only 4 learners)
-        """
+        Returns:
+            idx (int): The index to be filtered out.
+        '''
         if len(data) < 3:
             idx = None
         else:
