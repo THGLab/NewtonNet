@@ -14,7 +14,7 @@ from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.train.loss import get_loss_by_string
 from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
 # argument parser description
 parser = argparse.ArgumentParser(
@@ -51,7 +51,7 @@ train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell = pars
     train_path=settings['data'].get('train_path', None),
     val_path=settings['data'].get('val_path', None),
     test_path=settings['data'].get('test_path', None),
-    properties=settings['data'].get('properties', ['energy', 'forces']),
+    train_properties=settings['data'].get('train_properties', ['energy', 'forces']),
     pbc=settings['data'].get('pbc', False),
     cell=settings['data'].get('cell', torch.zeros(3, 3)),
     cutoff=settings['data'].get('cutoff', 5.0),
@@ -83,7 +83,7 @@ else:
         double_update_node=settings['model'].get('double_update_node', False),
         layer_norm=settings['model'].get('layer_norm', False),
         activation=get_activation_by_string(settings['model'].get('activation', 'swish')),
-        predictions=settings['model'].get('predictions', ['energy', 'forces']),
+        infer_properties=settings['model'].get('infer_properties', ['energy', 'forces']),
         normalizers=normalizers,
         train_normalizer=settings['model'].get('train_normalizer', False),
         dropout=settings['training'].get('dropout', 0.0),

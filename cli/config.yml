@@ -7,7 +7,7 @@ data:
   train_path: /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/morse1.npz    # The path to the training data.
   val_path:  /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/morse2.npz     # The path to the validation data. If None, use the training data. Default: None.
   test_path:  /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/morse3.npz    # The path to the test data. If None, use the validation data. Default: None.
-  properties: ['energy', 'forces']    # The properties to be trained. Default: [].
+  train_properties: ['energy', 'forces']    # The properties to be trained. Default: [].
   pbc: False                  # Whether to use periodic boundary. Default: False.
   cell: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]    # Unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]].
   cutoff: 5.0                 # The cutoff radius. Default: 5.0.
@@ -26,7 +26,7 @@ model:
   double_update_node: False   # Whether to update the invariant node twice in each message passing layer. Default: False.
   layer_norm: False           # Whether to use layer normalization after message passing. Default: False.
   activation: swish           # Activation function. Default: 'swish'.
-  predictions: ['energy', 'forces', 'hessian']    # The properties to predict. Default: [].
+  infer_properties: ['energy', 'forces', 'hessian']    # The properties to predict. Default: [].
   train_normalizer: False     # Whether the normalizers are trainable. Default: False.
   dropout: 0.0                # Dropout between 0 and 1. Default: 0.0.
 

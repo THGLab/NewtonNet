@@ -94,7 +94,7 @@ class ShellProvider(nn.Module):
             distance_vectors (torch.Tensor): The distance vectors between atoms with shape (n_data, n_atoms, n_atoms, 3).
             neighbor_mask (torch.Tensor): The mask for neighbors with shape (n_data, n_atoms, n_atoms).
         '''
-        if neighbor_mask.is_sparse:
+        if neighbor_mask.is_sparse:    # TODO: implement sparse tensors
             # # Get atomic positions of all neighboring indices
             # neighbor_mask = neighbor_mask.coalesce()
             # positions_i, positions_f = self.gather_neighbors(positions, neighbor_mask)    # data_size, n_atoms, n_atoms, 3
@@ -131,7 +131,7 @@ class ShellProvider(nn.Module):
                 distance_vectors = torch.gather(distance_vectors, dim=-2, index=distances_min_index.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, 1, 1, 3)).squeeze(-2)    # data_size, n_atoms, n_atoms, 3
                 distances = torch.gather(distances, dim=-1, index=distances_min_index.unsqueeze(-1)).squeeze(-1)    # data_size, n_atoms, n_atoms
             else:
-                distances = (distance_vectors + self.epsilon).norm(dim=-1)    # data_size, n_atoms, n_atoms
+                distances = (distance_vectors + self.epsilon).norm(dim=-1)    # data_size, n_atoms, n_atoms    # TODO: remove epsilon and replace with mask
 
             # mask based on cutoff
             if self.cutoff is not None:

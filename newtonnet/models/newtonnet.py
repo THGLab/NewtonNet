@@ -4,8 +4,7 @@ from torch import nn
 from newtonnet.layers.shells import ShellProvider
 from newtonnet.layers.cutoff import PolynomialCutoff
 from newtonnet.layers.representations import RadialBesselLayer
-from newtonnet.layers.scalers import NullNormalizer
-from newtonnet.models.output import get_output_by_string, FirstDerivativeProperty
+from newtonnet.models.output import get_output_by_string, FirstDerivativeProperty, SecondDerivativeProperty
 
 
 class NewtonNet(nn.Module):
@@ -41,7 +40,7 @@ class NewtonNet(nn.Module):
             double_update_node: bool = False,
             layer_norm: bool = False,
             activation: nn.Module = nn.SiLU(),
-            predictions: list = [],
+            infer_properties: list = [],
             dropout: float = 0.0,
             normalizers: nn.ModuleDict = {},
             train_normalizer: bool = False,
@@ -101,12 +100,15 @@ class NewtonNet(nn.Module):
             'train_normalizer': train_normalizer,
             }
         self.output_layers = nn.ModuleDict({})
-        for property in predictions:
-            normalizer = normalizers[property] if property in normalizers else NullNormalizer()
-            output_layer = get_output_by_string(property, normalizer, **output_kwargs)
-            self.output_layers.update({property: output_layer})
+        for key in infer_properties:
+            normalizer = normalizers[key] if key in normalizers else None
+            output_layer = get_output_by_string(key, normalizer, **output_kwargs)
+            self.output_layers.update({key: output_layer})
             if isinstance(output_layer, FirstDerivativeProperty):
                 self.embedding_layer.requires_dr = True
+            if isinstance(output_layer, SecondDerivativeProperty):
+                assert output_layer.dependent_property in self.output_layers.keys(), f'cannot find dependent property {output_layer.dependent_property}'
+                self.output_layers[output_layer.dependent_property].requires_dr = True
 
     def forward(
             self,
@@ -137,10 +139,10 @@ class NewtonNet(nn.Module):
             'positions': positions,
             'atom_mask': atom_mask,
             }
-        for property, output_layer in self.output_layers.items():
+        for key, output_layer in self.output_layers.items():
             output, output_normalized = output_layer(**outputs)
-            outputs[property] = output
-            outputs[property + '_normalized'] = output_normalized
+            outputs[key] = output
+            outputs[key + '_normalized'] = output_normalized
 
         return outputs
         
