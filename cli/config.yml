@@ -26,7 +26,7 @@ model:
   double_update_node: False   # Whether to update the invariant node twice in each message passing layer. Default: False.
   layer_norm: False           # Whether to use layer normalization after message passing. Default: False.
   activation: swish           # Activation function. Default: 'swish'.
-  predictions: ['energy', 'forces']    # The properties to predict. Default: [].
+  predictions: ['energy', 'forces', 'hessian']    # The properties to predict. Default: [].
   train_normalizer: False     # Whether the normalizers are trainable. Default: False.
   dropout: 0.0                # Dropout between 0 and 1. Default: 0.0.
 

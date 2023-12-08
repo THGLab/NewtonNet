@@ -1,43 +1,11 @@
-import copy
-import time
-
 import torch
 from torch import nn
-from torch.autograd import grad
 
 from newtonnet.layers.shells import ShellProvider
 from newtonnet.layers.cutoff import PolynomialCutoff
 from newtonnet.layers.representations import RadialBesselLayer
-from newtonnet.layers.aggregation import get_aggregation_by_string
 from newtonnet.layers.scalers import NullNormalizer
-
-
-def get_output_by_string(key, normalizer, **kwargs):
-    if key == 'energy':
-        output_layer = InvariantGraphProperty(
-            aggregration='sum',
-            normalizer=normalizer,
-            **kwargs,
-            )
-    elif key == 'forces':
-        output_layer = DerivativeProperty(
-            dependent_property='energy',
-            independent_property='positions',
-            negate=True,
-            normalizer=normalizer,
-            **kwargs,
-            )
-    elif key == 'hessian':
-        # output_layer = DerivativeProperty(
-        #     dependent_property='forces',
-        #     independent_property='positions',
-        #     normalizer=normalizers['hessian'],
-        #     train_normalizer=kwargs['train_normalizer'],
-        #     )
-        raise NotImplementedError('Hessian is not implemented yet')
-    else:
-        raise NotImplementedError(f'Output type {key} is not implemented yet')
-    return output_layer
+from newtonnet.models.output import get_output_by_string, FirstDerivativeProperty
 
 
 class NewtonNet(nn.Module):
@@ -137,7 +105,7 @@ class NewtonNet(nn.Module):
             normalizer = normalizers[property] if property in normalizers else NullNormalizer()
             output_layer = get_output_by_string(property, normalizer, **output_kwargs)
             self.output_layers.update({property: output_layer})
-            if isinstance(output_layer, DerivativeProperty):
+            if isinstance(output_layer, FirstDerivativeProperty):
                 self.embedding_layer.requires_dr = True
 
     def forward(
@@ -150,7 +118,6 @@ class NewtonNet(nn.Module):
             distance_vectors: torch.Tensor,
             ):
         # initialize node and edge representations
-        t1 = time.time()
         invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr, invariant_edge, distances, distance_vectors = \
             self.embedding_layer(atomic_numbers, positions, neighbor_mask, distances, distance_vectors)
 
@@ -343,132 +310,3 @@ class InteractionNet(nn.Module):
             invariant_node = self.norm(invariant_node)
 
         return invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr
-
-
-class InvariantNodeProperty(nn.Module):
-    '''
-    Invariant node property prediction
-
-    Parameters:
-        n_features (int): Number of features in the hidden layer.
-        activation (nn.Module): Activation function.
-        dropout (float): Dropout rate.
-        normalizer (nn.Module): The normalizer for the atomic properties.
-        train_normalizer (bool): Whether the normalizers are trainable.
-    '''
-    def __init__(self, n_features, activation, dropout, normalizer, train_normalizer, **kwargs):
-
-        super(InvariantNodeProperty, self).__init__()
-        if dropout > 0.0:
-            self.invariant_node_prediction = nn.Sequential(
-                nn.Linear(n_features, 128),
-                activation,
-                nn.Dropout(dropout),
-                nn.Linear(128, 64),
-                activation,
-                nn.Dropout(dropout),
-                nn.Linear(64, 1),
-                )
-        else:
-            self.invariant_node_prediction = nn.Sequential(
-                nn.Linear(n_features, 128),
-                activation,
-                nn.Linear(128, 64),
-                activation,
-                nn.Linear(64, 1),
-                )
-        
-        self.normalizer = normalizer
-        if train_normalizer:
-            self.normalizer.requires_grad_(True)
-
-    def forward(self, invariant_node, atom_mask, **inputs):
-        output_normalized = self.invariant_node_prediction(invariant_node) * atom_mask.unsqueeze(-1)
-        output = self.normalizer.reverse(output_normalized)
-        return output, output_normalized
-
-
-class InvariantGraphProperty(nn.Module):
-    '''
-    Invariant graph property prediction
-
-    Parameters:
-        n_features (int): Number of features in the hidden layer.
-        activation (nn.Module): Activation function.
-        dropout (float): Dropout rate.
-        aggregration (str): Aggregration method.
-        normalizer (nn.Module): The normalizer for the atomic properties.
-        train_normalizer (bool): Whether the normalizers are trainable.
-    '''
-    def __init__(self, n_features, activation, dropout, aggregration, normalizer, train_normalizer, **kwargs):
-
-        super(InvariantGraphProperty, self).__init__()
-        if dropout > 0.0:
-            self.invariant_node_prediction = nn.Sequential(
-                nn.Linear(n_features, n_features),
-                activation,
-                nn.Dropout(dropout),
-                nn.Linear(n_features, n_features),
-                activation,
-                nn.Dropout(dropout),
-                nn.Linear(n_features, 1),
-                )
-        else:
-            self.invariant_node_prediction = nn.Sequential(
-                nn.Linear(n_features, 128),
-                activation,
-                nn.Linear(128, 64),
-                activation,
-                nn.Linear(64, 1),
-                )
-
-        self.aggregration = get_aggregation_by_string(aggregration)
-        
-        self.normalizer = normalizer
-        if train_normalizer:
-            self.normalizer.requires_grad_(True)
-
-    def forward(self, invariant_node, atomic_numbers, atom_mask, **inputs):
-        output_normalized = self.invariant_node_prediction(invariant_node) * atom_mask.unsqueeze(-1)
-        output_normalized = self.aggregration(output_normalized, dim=1)
-        output = self.normalizer.reverse(output_normalized, atomic_numbers)
-        return output, output_normalized
-    
-
-class DerivativeProperty(nn.Module):
-    '''
-    First derivative property prediction
-
-    Parameters:
-        dependent_property (str): The dependent property.
-        independent_property (str): The independent property.
-        negate (bool): Whether to negate the output.
-        normalizer (nn.Module): The normalizer for the atomic properties.
-        train_normalizer (bool): Whether the normalizers are trainable.
-    '''
-    def __init__(self, dependent_property, independent_property, negate, normalizer, train_normalizer, **kwargs):
-
-        super(DerivativeProperty, self).__init__()
-        self.dependent_property = dependent_property
-        self.independent_property = independent_property
-        self.negate = negate
-
-        self.normalizer = normalizer
-        if train_normalizer:
-            self.normalizer.requires_grad_(True)
-
-    def forward(self, atomic_numbers, **inputs):
-        dependent_property = inputs[self.dependent_property]
-        independent_property = inputs[self.independent_property]
-        output = grad(
-            dependent_property, 
-            independent_property, 
-            grad_outputs=torch.ones_like(dependent_property), 
-            create_graph=True, 
-            retain_graph=True,
-            )[0]
-        output_normalized = self.normalizer.forward(output, atomic_numbers)
-        if self.negate:
-            output = -output
-            output_normalized = -output_normalized
-        return output, output_normalized

@@ -14,7 +14,7 @@ from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.train.loss import get_loss_by_string
 from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
-# torch.autograd.set_detect_anomaly(True)
+torch.autograd.set_detect_anomaly(True)
 
 # argument parser description
 parser = argparse.ArgumentParser(
