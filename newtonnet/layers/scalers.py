@@ -2,52 +2,52 @@ import torch
 from torch import nn
 
 
+def get_normalizer_by_string(key, **kwargs):
+    if key == 'energy':
+        normalizer = GraphPropertyNormalizer(**kwargs)
+    elif key == 'forces':
+        normalizer = NodePropertyNormalizer(**kwargs)
+    else:
+        raise ValueError(f'normalizer {key} is not supported')
+    return normalizer
+
+
 class Normalizer(nn.Module):
     '''
-    Normalizer layer for property standardization. 
+    Normalizer layer for graph property standardization. 
     Copied from: https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py under the MIT License.
 
     Parameters:
         data (torch.Tensor): The training data to be used for standardization.
-        numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
-        trainable (bool): Whether the layer is trainable. Default: False.
+        atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
     
     Note:
         For graph properties, the same scale and shift values are used for all atom types
         For node properties, each atom type uses its dedicated scale and shift values
     '''
-    def __init__(self, data=None, numbers=None, trainable=False):
+    def __init__(self, mean, std):
         super(Normalizer, self).__init__()
-        if data.dim() == 2:    # graph property  # inputs in data_size, _
-            mean = data.mean()
-            std = data.std()
-        elif data.dim() == 3:    # node property  # inputs in data_size, n_atoms, _
-            max_z = numbers.max()
-            mean = torch.tensor([data[numbers == z].mean() for z in range(max_z + 1)])
-            std = torch.tensor([data[numbers == z].std() for z in range(max_z + 1)])
-        self.mean = nn.Parameter(mean, requires_grad=trainable)
-        self.std = nn.Parameter(std, requires_grad=trainable)
+        self.mean = nn.Parameter(mean, requires_grad=False)
+        self.std = nn.Parameter(std, requires_grad=False)
 
-    def forward(self, inputs, numbers):
+    def select(self, atomic_numbers):
+        raise NotImplementedError('This is an abstract class. Use GraphPropertyNormalizer or NodePropertyNormalizer instead.')
+
+    def forward(self, inputs, atomic_numbers):
         '''
         Normalize inputs.
 
         Args:
             inputs (torch.Tensor): The input values.
-            numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
+            atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
 
         Returns:
             torch.Tensor: The normalized inputs.
         '''
-        dim = inputs.dim()
-        if dim == 2:    # graph property  # inputs in data_size, _
-            selected_mean = self.mean
-            selected_std = self.std
-        elif dim == 3:  # node property  # inputs in data_size, n_atoms, _
-            selected_mean = self.mean[numbers][:, :, None]
-            selected_std = self.std[numbers][:, :, None]
-        else:
-            raise ValueError(f'inputs dimension {dim} is not supported')
+        selected_mean, selected_std = self.select(atomic_numbers)
+        while selected_mean.ndim < inputs.ndim:
+            selected_mean = selected_mean.unsqueeze(-1)
+            selected_std = selected_std.unsqueeze(-1)
         outputs = (inputs - selected_mean) / selected_std
         return outputs
     
@@ -62,14 +62,54 @@ class Normalizer(nn.Module):
         Returns:
             torch.Tensor: The denormalized inputs.
         '''
-        dim = inputs.dim()
-        if dim == 2:    # graph property  # inputs in data_size, _
-            selected_mean = self.mean
-            selected_stddev = self.std
-        elif dim == 3:    # node property  # inputs in data_size, n_atoms, _
-            selected_mean = self.mean[atomic_numbers][:, :, None]
-            selected_stddev = self.std[atomic_numbers][:, :, None]
-        else:
-            raise ValueError(f'inputs dimension {dim} is not supported')
-        outputs = inputs * selected_stddev + selected_mean
+        selected_mean, selected_std = self.select(atomic_numbers)
+        while selected_mean.ndim < inputs.ndim:
+            selected_mean = selected_mean.unsqueeze(-1)
+            selected_std = selected_std.unsqueeze(-1)
+        outputs = inputs * selected_std + selected_mean
         return outputs
+    
+
+class GraphPropertyNormalizer(Normalizer):
+    '''
+    Normalizer layer for graph properties. 
+    
+    Parameters:
+        data (torch.Tensor): The training data to be used for standardization.
+        atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
+    '''
+    def __init__(self, data, atomic_numbers):
+        mean = data.mean(dim=0)
+        std = data.std(dim=0)
+        super(GraphPropertyNormalizer, self).__init__(mean, std)
+
+    def select(self, atomic_numbers):
+        return self.mean, self.std
+    
+
+class NodePropertyNormalizer(Normalizer):
+    '''
+    Normalizer layer for node properties. 
+    
+    Parameters:
+        data (torch.Tensor): The training data to be used for standardization.
+        atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
+    '''
+    def __init__(self, data, atomic_numbers):
+        max_atomic_number = atomic_numbers.max()
+        mean = torch.tensor([data[atomic_numbers == z].mean() for z in range(max_atomic_number + 1)])
+        std = torch.tensor([data[atomic_numbers == z].std() for z in range(max_atomic_number + 1)])
+        super(NodePropertyNormalizer, self).__init__(mean, std)
+
+    def select(self, atomic_numbers):
+        return self.mean[atomic_numbers], self.std[atomic_numbers]
+    
+class NullNormalizer(Normalizer):
+    '''
+    Null normalizer for untrained properties. Identity function.
+    '''
+    def __init__(self):
+        super(NullNormalizer, self).__init__(torch.tensor(0.), torch.tensor(1.))
+
+    def select(self, atomic_numbers):
+        return self.mean, self.std

@@ -14,25 +14,25 @@ from newtonnet.models.newtonnet import NewtonNet
 from newtonnet.train.loss import get_loss_by_string
 
 
-class Trainer:
+class Trainer(object):
     '''
     Trainer class for NewtonNet.
 
     Parameters:
         model (nn.Module): The model to train. Default: NewtonNet()
-        loss_fns (nn.Module, nn.Module): The loss functions to use for training and evaluation. Default: 'energy/force'
-        optimizer (optim.Optimizer): The optimizer to use for training. Default: Adam
-        lr_scheduler (optim.lr_scheduler._LRScheduler): The learning rate scheduler to use for training. Default: ReduceLROnPlateau
-        device (torch.device): The device to use for training. Default: cpu
+        loss_fns (nn.Module, nn.Module): The loss functions to use for training and evaluation. Default: None.
+        optimizer (optim.Optimizer): The optimizer to use for training. Default: Adam.
+        lr_scheduler (optim.lr_scheduler._LRScheduler): The learning rate scheduler to use for training. Default: ReduceLROnPlateau.
         output_base_path (str): The base path for the output directory.
         script_path (str): The path to the script that was used to start the training.
         settings_path (str): The path to the settings file that was used to start the training.
         resume_training (str): The path to a checkpoint to resume training from. Default: False.
         checkpoint_log (int): The interval in epochs for logging the training progress. Default: 1.
         checkpoint_val (int): The interval in epochs for validation. Default: 1.
-        checkpoint_test (int): The interval in epochs for testing. Default: 10.
+        checkpoint_test (int): The interval in epochs for testing. Default: 1.
         checkpoint_model (int): The interval in epochs for saving the model (must be validated first). Default: 1.
         verbose (bool): Whether to print the training progress. Default: False.
+        device (torch.device): The device to use for training. Default: cpu
     '''
     def __init__(
             self,
@@ -40,22 +40,24 @@ class Trainer:
             loss_fns: (nn.Module, nn.Module) = None,
             optimizer: optim.Optimizer = None,
             lr_scheduler: optim.lr_scheduler._LRScheduler = None,
-            device: torch.device = torch.device('cpu'),
             output_base_path: str = None,
             script_path: str = None,
             settings_path: str = None,
-            resume_training: str = False,
+            resume_training: str = None,
             checkpoint_log: int = 1,
             checkpoint_val: int = 1,
-            checkpoint_test: int = 10,
+            checkpoint_test: int = 1,
             checkpoint_model: int = 1,
             verbose: bool = False,
+            device: torch.device = torch.device('cpu'),
             ):
+        super(Trainer, self).__init__()
+        
         # training parameters
         self.model = model or NewtonNet()
         self.print_layers()
         trainable_params = filter(lambda p: p.requires_grad, self.model.parameters())
-        self.main_loss, self.eval_loss = loss_fns or get_loss_by_string('energy/force')
+        self.main_loss, self.eval_loss = loss_fns or get_loss_by_string()
         self.optimizer = optimizer or optim.Adam(trainable_params)
         self.lr_scheduler = lr_scheduler or ReduceLROnPlateau(self.optimizer)
         self.best_val_loss = torch.inf
@@ -73,7 +75,7 @@ class Trainer:
         self.check_model = checkpoint_model
 
         # checkpoints
-        if resume_training:
+        if resume_training is not None:
             checkpoint = torch.load(os.path.join(resume_training, 'models/train_state.tar'))
             self.epoch = checkpoint['epoch']
             self.model.load_state_dict(checkpoint['model_state_dict'])
@@ -171,7 +173,7 @@ class Trainer:
             train_generator,
             val_generator,
             test_generator,
-            epochs,
+            epochs=100,
             clip_grad=0,
             ):
         
@@ -226,13 +228,13 @@ class Trainer:
                 if self.verbose:
                     print(f'Train: Epoch {epoch}/{epochs} - Batch {train_step}/{len(train_generator)} - loss: {main_loss:.5f} - ', end='')
                     print(*[f'{key}: {value:.5f}' for key, value in eval_loss.items()], sep=' - ')
-                # self.plot_grad_flow(f'{epoch}_{train_step}')
 
             for key, value in train_losses.items():
                 train_losses[key] /= len(train_generator) if key == 'loss' else len(train_generator.dataset)
 
             # plots
-            # self.plot_grad_flow()
+            if epoch % self.check_log == 0:
+                self.plot_grad_flow(epoch)
 
             # validation
             val_losses = {}
@@ -243,25 +245,14 @@ class Trainer:
                 for val_step, val_batch in enumerate(val_generator):
                     batch_size = val_batch['atomic_numbers'].shape[0]
 
-                    if self.model.requires_dr:
-                        preds = self.model(
-                            atomic_numbers=val_batch['atomic_numbers'], 
-                            positions=val_batch['positions'], 
-                            atom_mask=val_batch['atom_mask'], 
-                            neighbor_mask=val_batch['neighbor_mask'],
-                            distances=val_batch['distances'],
-                            distance_vectors=val_batch['distance_vectors'],
-                            )
-                    else:
-                        with torch.no_grad():
-                            preds = self.model(
-                                atomic_numbers=val_batch['atomic_numbers'], 
-                                positions=val_batch['positions'], 
-                                atom_mask=val_batch['atom_mask'], 
-                                neighbor_mask=val_batch['neighbor_mask'],
-                                distances=val_batch['distances'],
-                                distance_vectors=val_batch['distance_vectors'],
-                                )
+                    preds = self.model(
+                        atomic_numbers=val_batch['atomic_numbers'], 
+                        positions=val_batch['positions'], 
+                        atom_mask=val_batch['atom_mask'], 
+                        neighbor_mask=val_batch['neighbor_mask'],
+                        distances=val_batch['distances'],
+                        distance_vectors=val_batch['distance_vectors'],
+                        )
                     
                     main_loss = self.main_loss(preds, val_batch).detach().item()
                     val_losses['loss'] += main_loss
@@ -299,25 +290,14 @@ class Trainer:
                 for test_step, test_batch in enumerate(test_generator):
                     batch_size = test_batch['atomic_numbers'].shape[0]
 
-                    if self.model.requires_dr:
-                        preds = self.model(
-                            atomic_numbers=test_batch['atomic_numbers'], 
-                            positions=test_batch['positions'], 
-                            atom_mask=test_batch['atom_mask'], 
-                            neighbor_mask=test_batch['neighbor_mask'],
-                            distances=test_batch['distances'],
-                            distance_vectors=test_batch['distance_vectors'],
-                            )
-                    else:
-                        with torch.no_grad():
-                            preds = self.model(
-                                atomic_numbers=test_batch['atomic_numbers'], 
-                                positions=test_batch['positions'], 
-                                atom_mask=test_batch['atom_mask'], 
-                                neighbor_mask=test_batch['neighbor_mask'],
-                                distances=test_batch['distances'],
-                                distance_vectors=test_batch['distance_vectors'],
-                                )
+                    preds = self.model(
+                        atomic_numbers=test_batch['atomic_numbers'], 
+                        positions=test_batch['positions'], 
+                        atom_mask=test_batch['atom_mask'], 
+                        neighbor_mask=test_batch['neighbor_mask'],
+                        distances=test_batch['distances'],
+                        distance_vectors=test_batch['distance_vectors'],
+                        )
                     
                     main_loss = self.main_loss(preds, test_batch).detach().item()
                     test_losses['loss'] += main_loss
@@ -338,7 +318,6 @@ class Trainer:
 
             # checkpoint
             if epoch % self.check_log == 0:
-                self.plot_grad_flow(epoch)
                 checkpoint = {}
                 checkpoint.update({'epoch': epoch})
                 checkpoint.update({f'train_{key}': value for key, value in train_losses.items()})

@@ -6,7 +6,7 @@ from torch.utils.data import random_split
 from torch.utils.data import DataLoader
 
 from newtonnet.data import MolecularDataset, NeighborEnvironment
-from newtonnet.layers.scalers import Normalizer
+from newtonnet.layers.scalers import get_normalizer_by_string
 
 
 def split(data, data_sizes):
@@ -61,11 +61,20 @@ def parse_train_test(
         train_batch_size (int): The batch size for training. Default: 32.
         val_batch_size (int): The batch size for validation. Default: 32.
         test_batch_size (int): The batch size for testing. Default: 32.
-        properties (list): The properties to be predicted. Default: ['E', 'F'].
+        properties (list): The properties to be trained. Default: ['energy', 'forces'].
         pbc (bool): Whether to use periodic boundary. Default: False.
-        cell (torch.tensor): Unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]].
+        cell (torch.tensor): The unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]].
         cutoff (float): The cutoff radius. Default: 5.0.
         device (torch.device): The device to use. Default: torch.device('cpu').
+        precision (torch.dtype): The precision of the model. Default: torch.float32.
+
+    Returns:
+        train_gen (torch.utils.data.DataLoader): The training data loader.
+        val_gen (torch.utils.data.DataLoader): The validation data loader.
+        test_gen (torch.utils.data.DataLoader): The test data loader.
+        embedded_atomic_numbers (torch.tensor): The embedded atomic numbers.
+        normalizers (nn.ModuleDict): The normalizers for each property.
+        shell (nn.Module): The neighbor environment.
     '''
     # environment
     print('Environment:')
@@ -143,10 +152,10 @@ def parse_train_test(
     print('normalizers:')
     normalizers = {}
     for property in properties:
-        normalizer = Normalizer(
+        normalizer = get_normalizer_by_string(
+            key=property,
             data=train_data.dataset.get(property)[train_data.indices],
-            numbers=train_data.dataset.atomic_numbers[train_data.indices],
-            trainable=False,
+            atomic_numbers=train_data.dataset.atomic_numbers[train_data.indices],
             )
         normalizers[property] = normalizer
         print(f'  {property} normalizer: mean {normalizer.mean.data.tolist()}, std {normalizer.std.data.tolist()}')

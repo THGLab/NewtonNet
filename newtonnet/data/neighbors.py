@@ -10,7 +10,7 @@ class NeighborEnvironment(object):
     Parameters:
         cutoff (float): The cutoff radius. Default: 5.0.
         pbc (bool): Whether to use periodic boundary conditions. Default: False.
-        cell (torch.tensor): Unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], i.e. no periodic boundary.
+        cell (torch.tensor): The unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], i.e. no periodic boundary.
 
     Notes:
         Sparse tensors are not yet supported.
