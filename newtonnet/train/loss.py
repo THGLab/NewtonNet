@@ -1,22 +1,36 @@
 import torch
 import torch.nn as nn
 
-def get_loss_by_string(**kwargs):
+def get_loss_by_string(mode=None, **kwargs):
     '''
-    mode: str
-        mode of the loss function
-    kwargs: dict
-        keyword arguments for the loss function
+    Get loss function by string
 
-    Returns
-    -------
-    main_loss: nn.Module
-        main loss function for model training (back propagation) and validation (learning rate scheduling)
-    eval_loss: nn.Module
-        evaluation loss function for task-specific model evaluation
+    Parameters:
+        mode (str): The loss function to use. Default: None.
+        w_energy (float): The weight for the energy loss. Default: 0.0.
+        w_force (float): The weight for the force loss. Default: 0.0.
+        w_f_mag (float): The weight for the force magnitude loss. Default: 0.0.
+        w_f_dir (float): The weight for the force direction loss. Default: 0.0.
+
+    Returns:
+        main_loss (nn.Module): The main loss function for model training (back propagation) and validation (learning rate scheduling).
+        eval_loss (nn.Module): The evaluation loss function for task-specific model evaluation.
     '''
-    mode = kwargs.get('mode', 'energy/force')
-    if mode == 'energy/force':
+    if mode is None:
+        main_loss = MultitaskLoss(loss_fns=[], sum=True)
+        eval_loss = MultitaskLoss(loss_fns=[], sum=False)
+
+    elif mode == 'energy':
+        main_losses = []
+        if kwargs.get('w_energy', 0.0) > 0.0:
+            main_losses.append(ScalarLoss('energy_normalized', mode='mse', masked=False, weight=kwargs['w_energy']))
+        main_loss = MultitaskLoss(loss_fns=main_losses, sum=True)
+
+        eval_losses = []
+        eval_losses.append(ScalarLoss('energy', mode='mae', masked=False, weight=1.0))
+        eval_loss = MultitaskLoss(loss_fns=eval_losses, sum=False)
+
+    elif mode == 'energy/forces':
         main_losses = []
         if kwargs.get('w_energy', 0.0) > 0.0:
             main_losses.append(ScalarLoss('energy_normalized', mode='mse', masked=False, weight=kwargs['w_energy']))
@@ -26,12 +40,13 @@ def get_loss_by_string(**kwargs):
             main_losses.append(VectorNormLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_f_mag']))
         if kwargs.get('w_f_dir', 0.0) > 0.0:
             main_losses.append(VectorCosLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_f_dir']))
-        main_loss = MultitaskLoss(mode=mode, loss_fns=main_losses, sum=True)
+        main_loss = MultitaskLoss(loss_fns=main_losses, sum=True)
 
         eval_losses = []
         eval_losses.append(ScalarLoss('energy', mode='mae', masked=False, weight=1.0))
         eval_losses.append(VectorLoss('forces', mode='mae', masked=True, weight=1.0))
-        eval_loss = MultitaskLoss(mode=mode, loss_fns=eval_losses, sum=False)
+        eval_loss = MultitaskLoss(loss_fns=eval_losses, sum=False)
+        
     else:
         raise ValueError(f'loss {mode} not implemented')
     
@@ -39,6 +54,15 @@ def get_loss_by_string(**kwargs):
 
 
 class BaseLoss(nn.Module):
+    '''
+    Base loss class
+
+    Parameters:
+        key (str): The key of the data to be used.
+        mode (str): The loss function to use. Default: 'mse'.
+        masked (bool): Whether to mask the loss. Default: False.
+        weight (float): The weight for the loss. Default: 1.0.
+    '''
     def __init__(
             self, 
             key: str, 
@@ -116,9 +140,15 @@ class VectorCosLoss(BaseLoss):
 
 
 class MultitaskLoss(nn.Module):
-    def __init__(self, mode: str, loss_fns: list, sum: bool = True):
+    '''
+    Multitask loss class
+
+    Parameters:
+        loss_fns (list): The list of loss functions.
+        sum (bool): Whether to sum the loss functions. Default: True.
+    '''
+    def __init__(self, loss_fns: list, sum: bool = True):
         super(MultitaskLoss, self).__init__()
-        self.mode = mode
         self.loss_fns = loss_fns
         self.sum = sum
 

@@ -14,18 +14,19 @@ from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.train.loss import get_loss_by_string
 from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
+# torch.autograd.set_detect_anomaly(True)
 
 # argument parser description
 parser = argparse.ArgumentParser(
-    description=
-    'This is a pacakge to train NewtonNet on a given data.'
-)
+    description='This is a pacakge to train NewtonNet on a given data.',
+    )
 parser.add_argument(
     '-c',
     '--config',
     type=str,
     required=True,
-    help='The path to the Yaml configuration file.')
+    help='The path to the Yaml configuration file.',
+    )
 
 # define arguments
 args = parser.parse_args()
@@ -38,8 +39,8 @@ script_path = os.path.abspath(__file__)
 output_base_path = settings['general']['output']
 
 # device
-precision = set_precison_by_string(settings['general']['precision'])
-if type(settings['general']['device']) is list:
+precision = set_precison_by_string(settings['general'].get('precision', 'float32'))
+if type(settings['general'].get('device', 'cpu')) is list:
     device = [torch.device(item) for item in settings['general']['device']]
 else:
     device = [torch.device(settings['general']['device'])]
@@ -51,6 +52,8 @@ train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell = pars
     val_path=settings['data'].get('val_path', None),
     test_path=settings['data'].get('test_path', None),
     properties=settings['data'].get('properties', ['energy', 'forces']),
+    pbc=settings['data'].get('pbc', False),
+    cell=settings['data'].get('cell', torch.zeros(3, 3)),
     cutoff=settings['data'].get('cutoff', 5.0),
     train_size=settings['data'].get('train_size', -1),
     val_size=settings['data'].get('val_size', -1),
@@ -58,37 +61,40 @@ train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell = pars
     train_batch_size=settings['training'].get('train_batch_size', 32),
     val_batch_size=settings['training'].get('val_batch_size', 32),
     test_batch_size=settings['training'].get('test_batch_size', 32),
-    pbc=settings['data'].get('pbc', False),
-    cell=settings['data'].get('cell', torch.zeros(3, 3)),
     device=device[0],
     precision=precision,
     )
 
 # model
-if settings['model']['pre_trained']:
-    model_path = settings['model']['pre_trained']
-    model = torch.load(model_path, map_location=device[0])
-else:
-    activation = get_activation_by_string(settings['model'].get('activation', 'swish'))
-    cutoff_network = get_cutoff_by_string(settings['model'].get('cutoff_network', 'poly'), shell.cutoff)
-
-    model = NewtonNet(
-        n_basis=settings['model']['resolution'],
-        n_features=settings['model']['n_features'],
-        activation=activation,
-        n_interactions=settings['model']['n_interactions'],
-        dropout=settings['training']['dropout'],
-        embedded_atomic_numbers=embedded_atomic_numbers,
-        shell=shell,
-        cutoff_network=cutoff_network,
-        normalizers=normalizers,
-        train_normalizer=settings['model']['train_normalizer'],
-        device=device[0],
-        share_layers=settings['model']['shared_interactions'],
-        double_update_node=settings['model']['double_update_node'],
-        layer_norm=settings['model']['layer_norm'],
-        predictions=settings['model']['predictions'],
+if settings['model'].get('pretrained_model', None) is not None:
+    model = torch.load(
+        settings['model']['pretrained_model'], 
+        map_location=device[0],
         )
+else:
+    model = NewtonNet(
+        n_features=settings['model'].get('n_features', 128),
+        embedded_atomic_numbers=embedded_atomic_numbers,
+        n_basis=settings['model'].get('n_basis', 20),
+        shell=shell,
+        cutoff_network=get_cutoff_by_string(settings['model'].get('cutoff_network', 'poly'), shell.cutoff),
+        n_interactions=settings['model'].get('n_interactions', 3),
+        share_interactions=settings['model'].get('share_layers', False),
+        double_update_node=settings['model'].get('double_update_node', False),
+        layer_norm=settings['model'].get('layer_norm', False),
+        activation=get_activation_by_string(settings['model'].get('activation', 'swish')),
+        predictions=settings['model'].get('predictions', ['energy', 'forces']),
+        normalizers=normalizers,
+        train_normalizer=settings['model'].get('train_normalizer', False),
+        dropout=settings['training'].get('dropout', 0.0),
+        device=device[0],
+        )
+
+# loss
+main_loss, eval_loss = get_loss_by_string(
+    settings['training'].get('loss', None),
+    **settings['training'].get('loss_kwargs', {}),
+    )
 
 # optimizer
 trainable_params = filter(lambda p: p.requires_grad, model.parameters())
@@ -103,39 +109,29 @@ lr_scheduler = get_scheduler_by_string(
     **settings['training'].get('lr_scheduler_kwargs', {}),
     )
 
-# loss
-main_loss, eval_loss = get_loss_by_string(
-    **settings['training'].get('loss_kwargs', {}),
-    )
-
 # training
 trainer = Trainer(
     model=model,
     loss_fns=(main_loss, eval_loss),
     optimizer=optimizer,
-    device=device,
+    lr_scheduler=lr_scheduler,
     output_base_path=output_base_path,
     script_path=script_path,
     settings_path=settings_path,
-    resume_training=settings['training']['resume_training'],
-    lr_scheduler=lr_scheduler,
-    checkpoint_log=settings['checkpoint']['log'],
-    checkpoint_val=settings['checkpoint']['val'],
-    checkpoint_test=settings['checkpoint']['test'],
-    checkpoint_model=settings['checkpoint']['model'],
-    verbose=settings['checkpoint']['verbose'],
+    resume_training=settings['checkpoint'].get('resume_training', None),
+    checkpoint_log=settings['checkpoint'].get('log', 1),
+    checkpoint_val=settings['checkpoint'].get('val', 1),
+    checkpoint_test=settings['checkpoint'].get('test', 1),
+    checkpoint_model=settings['checkpoint'].get('model', 1),
+    verbose=settings['checkpoint'].get('verbose', False),
+    device=device,
     )
-
-# trainer.print_layers()
-
-# tr_steps=1; val_steps=0; irc_steps=0; test_steps=0
-
 trainer.train(
     train_generator=train_gen,
     val_generator=val_gen,
     test_generator=test_gen,
-    epochs=settings['training']['epochs'],
-    clip_grad=settings['training']['clip_grad'],
+    epochs=settings['training'].get('epochs', 100),
+    clip_grad=settings['training'].get('clip_grad', 0.0),
     )
 
 print('done!')

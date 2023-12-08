@@ -1,4 +1,5 @@
 import copy
+import time
 
 import torch
 from torch import nn
@@ -8,9 +9,10 @@ from newtonnet.layers.shells import ShellProvider
 from newtonnet.layers.cutoff import PolynomialCutoff
 from newtonnet.layers.representations import RadialBesselLayer
 from newtonnet.layers.aggregation import get_aggregation_by_string
+from newtonnet.layers.scalers import NullNormalizer
 
 
-def get_output_by_string(key, normalizer, kwargs):
+def get_output_by_string(key, normalizer, **kwargs):
     if key == 'energy':
         output_layer = InvariantGraphProperty(
             aggregration='sum',
@@ -43,46 +45,44 @@ class NewtonNet(nn.Module):
     Molecular Newtonian Message Passing
 
     Parameters:
-        n_basis (int): Number of radial basis functions. Default: 20.
         n_features (int): Number of features in the latent layer. Default: 128.
-        activation (nn.Module): Activation function. Default: nn.SiLU().
-        n_interactions (int): Number of message passing layers. Default: 3.
-        dropout (float): Dropout rate. Default: 0.0.
         embedded_atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
+        n_basis (int): Number of radial basis functions for edge description. Default: 20.
         shell (nn.Module): The shell module. Default: ShellProvider().
-        cutoff_network (nn.Module): The cutoff layer. Default: PolynomialCutoff(shell.cutoff).
-        normalizers (nn.ModuleDict): The normalizers for the atomic properties. Default: {}.
-        train_normalizer (bool): Whether the normalizers are trainable. Default: False.
-        requires_dr (bool): Whether to create gradient graph of the positions. Default: False.
-        device (torch.device): The device to run the network. Default: None.
-        share_layers (bool): Whether to share the weights of the message passing layers. Default: False.
+        cutoff_network (nn.Module): The cutoff function. Default: PolynomialCutoff(shell.cutoff).
+        n_interactions (int): Number of message passing layers. Default: 3.
+        share_interactions (bool): Whether to share the weights of the message passing layers. Default: False.
         double_update_node (bool): Whether to update the invariant node twice in each message passing layer. Default: False.
         layer_norm (bool): Whether to use layer normalization after message passing. Default: False.
+        activation (nn.Module): Activation function. Default: nn.SiLU().
         predictions (list): The properties to predict. Default: [].
+        dropout (float): Dropout between 0 and 1. Default: 0.0.
+        normalizers (nn.ModuleDict): The normalizers for the atomic properties. Default: {}.
+        train_normalizer (bool): Whether the normalizers are trainable. Default: False.
+        device (torch.device): The device to run the network. Default: torch.device('cpu').
     '''
     def __init__(
             self,
-            n_basis: int = 20,
             n_features: int = 128,
-            activation: nn.Module = nn.SiLU(),
-            n_interactions: int = 3,
-            dropout: float = 0.0,
-            embedded_atomic_numbers: torch.Tensor = torch.tensor([1, 6, 7, 8]),
+            embedded_atomic_numbers: torch.Tensor = torch.tensor([0]),
+            n_basis: int = 20,
             shell: nn.Module = None,
             cutoff_network: nn.Module = None,
+            n_interactions: int = 3,
+            share_interactions: bool = False,
+            double_update_node: bool = False,
+            layer_norm: bool = False,
+            activation: nn.Module = nn.SiLU(),
+            predictions: list = [],
+            dropout: float = 0.0,
             normalizers: nn.ModuleDict = {},
             train_normalizer: bool = False,
             device: torch.device = torch.device('cpu'),
-            share_layers: bool = False,
-            double_update_node: bool = False,
-            layer_norm: bool = False,
-            predictions: list = [],
     ) -> None:
 
         super(NewtonNet, self).__init__()
 
         # embedding layer
-        self.requires_dr = False
         if shell is None:
             print('use default shell')
             shell = ShellProvider()
@@ -98,7 +98,7 @@ class NewtonNet(nn.Module):
             )
 
         # message passing
-        if share_layers:
+        if share_interactions:
             # use the same message instance (hence the same weights)
             self.interaction_layers = nn.ModuleList([
                 InteractionNet(
@@ -132,14 +132,13 @@ class NewtonNet(nn.Module):
             'dropout': dropout,
             'train_normalizer': train_normalizer,
             }
-        self.output_layers = nn.ModuleDict({
-            property: get_output_by_string(property, normalizers[property], kwargs=output_kwargs) for property in predictions
-            })
-        for output_layer in self.output_layers.values():
+        self.output_layers = nn.ModuleDict({})
+        for property in predictions:
+            normalizer = normalizers[property] if property in normalizers else NullNormalizer()
+            output_layer = get_output_by_string(property, normalizer, **output_kwargs)
+            self.output_layers.update({property: output_layer})
             if isinstance(output_layer, DerivativeProperty):
-                self.requires_dr = True
                 self.embedding_layer.requires_dr = True
-                break
 
     def forward(
             self,
@@ -151,6 +150,7 @@ class NewtonNet(nn.Module):
             distance_vectors: torch.Tensor,
             ):
         # initialize node and edge representations
+        t1 = time.time()
         invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr, invariant_edge, distances, distance_vectors = \
             self.embedding_layer(atomic_numbers, positions, neighbor_mask, distances, distance_vectors)
 
@@ -195,8 +195,8 @@ class EmbeddingNet(nn.Module):
 
         # atomic embedding
         self.n_features = n_features
-        self.node_embedding = nn.Embedding(embedded_atomic_numbers.max() + 1, n_features, padding_idx=0, device=device)
-        for z in range(1, embedded_atomic_numbers.max() + 1):
+        self.node_embedding = nn.Embedding(embedded_atomic_numbers.max() + 1, n_features, device=device)
+        for z in range(embedded_atomic_numbers.max() + 1):
             if z not in embedded_atomic_numbers:
                 self.node_embedding.weight.data[z] = torch.nan
         self.requires_dr = False
@@ -222,6 +222,7 @@ class EmbeddingNet(nn.Module):
         distance_vectors = distance_vectors / (distances.unsqueeze(-1) + self.epsilon)
 
         # initialize edge representations
+        # self.edge_embedding.requires_grad_(False)
         invariant_edge = self.edge_embedding(distances)
 
 
@@ -376,10 +377,10 @@ class InvariantNodeProperty(nn.Module):
                 activation,
                 nn.Linear(64, 1),
                 )
+        
+        self.normalizer = normalizer
         if train_normalizer:
-            self.normalizer = copy.deepcopy(normalizer).requires_grad_(True)
-        else:
-            self.normalizer = normalizer
+            self.normalizer.requires_grad_(True)
 
     def forward(self, invariant_node, atom_mask, **inputs):
         output_normalized = self.invariant_node_prediction(invariant_node) * atom_mask.unsqueeze(-1)
@@ -423,10 +424,9 @@ class InvariantGraphProperty(nn.Module):
 
         self.aggregration = get_aggregation_by_string(aggregration)
         
+        self.normalizer = normalizer
         if train_normalizer:
-            self.normalizer = copy.deepcopy(normalizer).requires_grad_(True)
-        else:
-            self.normalizer = normalizer
+            self.normalizer.requires_grad_(True)
 
     def forward(self, invariant_node, atomic_numbers, atom_mask, **inputs):
         output_normalized = self.invariant_node_prediction(invariant_node) * atom_mask.unsqueeze(-1)
@@ -452,10 +452,10 @@ class DerivativeProperty(nn.Module):
         self.dependent_property = dependent_property
         self.independent_property = independent_property
         self.negate = negate
+
+        self.normalizer = normalizer
         if train_normalizer:
-            self.normalizer = copy.deepcopy(normalizer).requires_grad_(True)
-        else:
-            self.normalizer = normalizer
+            self.normalizer.requires_grad_(True)
 
     def forward(self, atomic_numbers, **inputs):
         dependent_property = inputs[self.dependent_property]
