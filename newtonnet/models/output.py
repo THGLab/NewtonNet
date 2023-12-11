@@ -1,3 +1,5 @@
+from typing import List, Dict
+
 import torch
 from torch import nn
 from torch.autograd import grad
@@ -48,7 +50,15 @@ class InvariantNodeProperty(nn.Module):
         normalizer (nn.Module): The normalizer for the atomic properties.
         train_normalizer (bool): Whether the normalizers are trainable.
     '''
-    def __init__(self, n_features, activation, dropout, normalizer, train_normalizer, **kwargs):
+    def __init__(
+            self, 
+            n_features: int, 
+            activation: nn.Module,
+            dropout: float,
+            normalizer: nn.Module,
+            train_normalizer: bool = False,
+            **kwargs,
+            ):
 
         super(InvariantNodeProperty, self).__init__()
         if dropout > 0.0:
@@ -74,7 +84,9 @@ class InvariantNodeProperty(nn.Module):
         if train_normalizer:
             self.normalizer.requires_grad_(True)
 
-    def forward(self, invariant_node, atom_mask, **inputs):
+    def forward(self, inputs: Dict[str, torch.Tensor]):
+        invariant_node = inputs['invariant_node']
+        atom_mask = inputs['atom_mask']
         output_normalized = self.invariant_node_prediction(invariant_node) * atom_mask.unsqueeze(-1)
         output = self.normalizer.reverse(output_normalized)
         return output, output_normalized
@@ -92,7 +104,16 @@ class InvariantGraphProperty(nn.Module):
         normalizer (nn.Module): The normalizer for the atomic properties.
         train_normalizer (bool): Whether the normalizers are trainable.
     '''
-    def __init__(self, n_features, activation, dropout, aggregration, normalizer, train_normalizer=False, **kwargs):
+    def __init__(
+            self, 
+            n_features: int,
+            activation: nn.Module,
+            dropout: float,
+            aggregration: str,
+            normalizer: nn.Module,
+            train_normalizer: bool = False, 
+            **kwargs,
+            ):
 
         super(InvariantGraphProperty, self).__init__()
         if dropout > 0.0:
@@ -120,7 +141,10 @@ class InvariantGraphProperty(nn.Module):
         if train_normalizer:
             self.normalizer.requires_grad_(True)
 
-    def forward(self, invariant_node, atomic_numbers, atom_mask, **inputs):
+    def forward(self, inputs: Dict[str, torch.Tensor]):
+        invariant_node = inputs['invariant_node']
+        atom_mask = inputs['atom_mask']
+        atomic_numbers = inputs['atomic_numbers']
         output_normalized = self.invariant_node_prediction(invariant_node) * atom_mask.unsqueeze(-1)
         output_normalized = self.aggregration(output_normalized, dim=1)
         output = self.normalizer.reverse(output_normalized, atomic_numbers)
@@ -138,7 +162,15 @@ class FirstDerivativeProperty(nn.Module):
         normalizer (nn.Module): The normalizer for the atomic properties.
         train_normalizer (bool): Whether the normalizers are trainable.
     '''
-    def __init__(self, dependent_property, independent_property, negate, normalizer, train_normalizer=False, **kwargs):
+    def __init__(
+            self, 
+            dependent_property: str,
+            independent_property: str,
+            negate: bool,
+            normalizer: nn.Module,
+            train_normalizer: bool = False, 
+            **kwargs,
+            ):
 
         super(FirstDerivativeProperty, self).__init__()
         self.dependent_property = dependent_property
@@ -150,10 +182,15 @@ class FirstDerivativeProperty(nn.Module):
             self.normalizer.requires_grad_(True)
         self.requires_dr = False
 
-    def forward(self, atomic_numbers, **inputs):
+    def forward(self, inputs: Dict[str, torch.Tensor]):
+        atomic_numbers = inputs['atomic_numbers']
         dependent_property = inputs[self.dependent_property]
         independent_property = inputs[self.independent_property]
         grad_outputs = torch.ones_like(dependent_property)
+        # TODO: simplify typing
+        dependent_property = [dependent_property]    # Tensor to List[Tensor]
+        independent_property = [independent_property]    # Tensor to List[Tensor]
+        grad_outputs = [grad_outputs if grad_outputs else None] if grad_outputs else None    # Tensor to Optional[List[Optional[Tensor]]]
         output = grad(
             dependent_property, 
             independent_property, 
@@ -161,6 +198,7 @@ class FirstDerivativeProperty(nn.Module):
             create_graph=self.requires_dr, 
             retain_graph=True,
             )[0]
+        assert output is not None    # Optional[Tensor] to Tensor
         output_normalized = self.normalizer.forward(output, atomic_numbers)
         if self.negate:
             return -output, -output_normalized
@@ -178,7 +216,15 @@ class SecondDerivativeProperty(nn.Module):
         normalizer (nn.Module): The normalizer for the atomic properties.
         train_normalizer (bool): Whether the normalizers are trainable.
     '''
-    def __init__(self, dependent_property, independent_property, negate, normalizer, train_normalizer=False, **kwargs):
+    def __init__(
+            self, 
+            dependent_property: str,
+            independent_property: str,
+            negate: bool,
+            normalizer: nn.Module,
+            train_normalizer: bool = False,
+            **kwargs,
+            ):
 
         super(SecondDerivativeProperty, self).__init__()
         self.dependent_property = dependent_property
@@ -189,12 +235,14 @@ class SecondDerivativeProperty(nn.Module):
         if train_normalizer:
             self.normalizer.requires_grad_(True)
 
-    def forward(self, atomic_numbers, **inputs):
+    def forward(self, inputs: Dict[str, torch.Tensor]):
+        atomic_numbers = inputs['atomic_numbers']
         dependent_property = inputs[self.dependent_property]
         independent_property = inputs[self.independent_property]
         n_data, n_atoms, n_dim = independent_property.shape
         grad_outputs = torch.eye(n_atoms * n_dim, device=independent_property.device)    # n_atoms * n_dim, n_atoms * n_dim
         grad_outputs = grad_outputs.view((n_atoms * n_dim, 1, n_atoms, n_dim)).repeat(1, n_data, 1, 1)    # n_atoms * n_dim, n_data, n_atoms, n_dim
+        # TODO: update TorchScript support
         output = torch.vmap(
             lambda V: grad(
                 dependent_property, 
