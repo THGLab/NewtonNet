@@ -33,7 +33,7 @@ class Normalizer(nn.Module):
     def select(self, atomic_numbers):
         raise NotImplementedError('This is an abstract class. Use GraphPropertyNormalizer or NodePropertyNormalizer instead.')
 
-    def forward(self, inputs, atomic_numbers):
+    def forward(self, inputs: torch.Tensor, atomic_numbers: torch.Tensor):
         '''
         Normalize inputs.
 
