@@ -119,6 +119,20 @@ class NewtonNet(nn.Module):
             distances: torch.Tensor,
             distance_vectors: torch.Tensor,
             ):
+        '''
+        Network forward pass
+
+        Parameters:
+            atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule. Shape: (batch_size, n_atoms).
+            positions (torch.Tensor): The positions of the atoms in the molecule. Shape: (batch_size, n_atoms, 3).
+            atom_mask (torch.Tensor): The mask of the atoms in the molecule. Shape: (batch_size, n_atoms).
+            neighbor_mask (torch.Tensor): The mask of the neighbors of the atoms in the molecule. Shape: (batch_size, n_atoms, n_atoms).
+            distances (torch.Tensor): The distances between the atoms in the molecule. Shape: (batch_size, n_atoms, n_atoms).
+            distance_vectors (torch.Tensor): The distance vectors between the atoms in the molecule. Shape: (batch_size, n_atoms, n_atoms, 3).
+
+        Returns:
+            outputs (dict): The outputs of the network.
+        '''
         # initialize node and edge representations
         invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr, invariant_edge, distances, distance_vectors = \
             self.embedding_layer(atomic_numbers, positions, neighbor_mask, distances, distance_vectors)
