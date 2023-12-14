@@ -9,8 +9,8 @@ def get_loss_by_string(mode=None, **kwargs):
         mode (str): The loss function to use. Default: None.
         w_energy (float): The weight for the energy loss. Default: 0.0.
         w_force (float): The weight for the force loss. Default: 0.0.
-        w_f_mag (float): The weight for the force magnitude loss. Default: 0.0.
-        w_f_dir (float): The weight for the force direction loss. Default: 0.0.
+        w_force_mag (float): The weight for the force magnitude loss. Default: 0.0.
+        w_force_dir (float): The weight for the force direction loss. Default: 0.0.
 
     Returns:
         main_loss (nn.Module): The main loss function for model training (back propagation) and validation (learning rate scheduling).
@@ -36,10 +36,10 @@ def get_loss_by_string(mode=None, **kwargs):
             main_losses.append(ScalarLoss('energy_normalized', mode='mse', masked=False, weight=kwargs['w_energy']))
         if kwargs.get('w_force', 0.0) > 0.0:
             main_losses.append(VectorLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_force']))
-        if kwargs.get('w_f_mag', 0.0) > 0.0:
-            main_losses.append(VectorNormLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_f_mag']))
-        if kwargs.get('w_f_dir', 0.0) > 0.0:
-            main_losses.append(VectorCosLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_f_dir']))
+        if kwargs.get('w_force_mag', 0.0) > 0.0:
+            main_losses.append(VectorNormLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_force_mag']))
+        if kwargs.get('w_force_dir', 0.0) > 0.0:
+            main_losses.append(VectorCosLoss('forces_normalized', mode='mse', masked=False, weight=kwargs['w_force_dir']))
         main_loss = MultitaskLoss(loss_fns=main_losses, sum=True)
 
         eval_losses = []
