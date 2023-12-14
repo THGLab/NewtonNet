@@ -19,7 +19,7 @@ class Trainer(object):
     Trainer class for NewtonNet.
 
     Parameters:
-        model (nn.Module): The model to train. Default: NewtonNet()
+        model (nn.Module): The model to train.
         loss_fns (nn.Module, nn.Module): The loss functions to use for training and evaluation. Default: None.
         optimizer (optim.Optimizer): The optimizer to use for training. Default: Adam.
         lr_scheduler (optim.lr_scheduler._LRScheduler): The learning rate scheduler to use for training. Default: ReduceLROnPlateau.
@@ -36,7 +36,7 @@ class Trainer(object):
     '''
     def __init__(
             self,
-            model: nn.Module = None,
+            model: nn.Module,
             loss_fns: (nn.Module, nn.Module) = None,
             optimizer: optim.Optimizer = None,
             lr_scheduler: optim.lr_scheduler._LRScheduler = None,
@@ -54,7 +54,7 @@ class Trainer(object):
         super(Trainer, self).__init__()
         
         # training parameters
-        self.model = model or NewtonNet()
+        self.model = model
         self.print_layers()
         trainable_params = filter(lambda p: p.requires_grad, self.model.parameters())
         self.main_loss, self.eval_loss = loss_fns or get_loss_by_string()
