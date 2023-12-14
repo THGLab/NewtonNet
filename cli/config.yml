@@ -36,8 +36,8 @@ training:
     w_energy: 1.0             # The weight for the energy loss. Default: 0.0.
     w_force: 0.0              # The weight for the force loss. Default: 0.0.
     # wf_decay: 0.0             # The rate of exponential decay of force wight by training epoch
-    w_f_mag: 0.0              # The weight for the force magnitude loss. Default: 0.0.
-    w_f_dir: 0.0              # The weight for the force direction loss. Default: 0.0.
+    w_force_mag: 0.0              # The weight for the force magnitude loss. Default: 0.0.
+    w_force_dir: 0.0              # The weight for the force direction loss. Default: 0.0.
   optimizer: 'adam'           # The optimizer to use for training. Default: 'adam'.
   optimizer_kwargs:           # The keyword arguments for the optimizer.
     lr: 1.0e-4                # The learning rate. Default: 1.0e-3.
