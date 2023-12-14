@@ -1,69 +1,64 @@
 general:
-  me: config.yml                                # path to this file
-  device: [cuda:0, cuda:1, cuda:2, cuda:3]      # cpu / cuda:0 / list of cuda
-  driver: run.py                                # path to the run script
-  output: [local/ccsd/test , 1]                 # path and iterator for the output directory
+  device: cpu                # The device to use. Default: 'cpu'.
+  output: /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/train_h2_test     # path and iterator for the output directory
+  precision: single          # Precision of the model. Default: 'single'.
 
 data:
-  train_path: /home/data/MLFF/md17/toluene_ccsd_t-train.npz   # path to the training data
-  test_path: /home/data/MLFF/md17/toluene_ccsd_t-test.npz     # path to the test data
-  cutoff: 5.0                 # cutoff radius
-  train_size: 950             # training set size: to sample randomly
-  val_size: 49                # validation set size: to sample randomly
-  test_size: 1000             # test set size: to sample randomly
-  random_states: 90           # random seed for data splitting
+  train_path: /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/morse1.npz    # The path to the training data.
+  val_path:  /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/morse2.npz     # The path to the validation data. If None, use the training data. Default: None.
+  test_path:  /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/morse3.npz    # The path to the test data. If None, use the validation data. Default: None.
+  train_properties: ['energy', 'forces']    # The properties to be trained. Default: [].
+  pbc: False                  # Whether to use periodic boundary. Default: False.
+  cell: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]    # Unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]].
+  cutoff: 5.0                 # The cutoff radius. Default: 5.0.
+  train_size: -1              # The size of the training set. If -1, use all data. Default: -1.
+  val_size: -1                # The size of the validation set. If -1, use all data. Default: -1.
+  test_size: -1               # The size of the test set. If -1, use all data. Default: -1.
+  random_states: 60           # Random seed for data splitting. Default: 42.
 
 model:
-  pre_trained: False          # path to the previously trained model for warm-up start
-  activation: swish           # activation function: swish, ssp, relu, ...
-  requires_dr: True           # if derivative of the output is required
-  w_energy: 1.0               # the weight of energy loss in the loss function
-  w_force: 100.0              # the weight of force loss in the loss function
-  wf_decay: 0.0               # rate of exponential decay of force wight by training epoch
-  w_f_mag: 0.0                # the weight of force magnitude loss in the loss function
-  w_f_dir: 1.0                # the weight of force direction loss in the loss function
-  resolution: 20              # number of basis functions that describe interatomic distances
-  n_features: 128             # number of features
-  max_z: 10                   # maximum atomic number in the chemical systems
-  n_interactions: 3           # number of interaction blocks of newtonnet
-  cutoff_network: poly        # the cutoff function: poly (polynomial), cosine
-  normalize_atomic: False     # if True the atomic energy needs to be inverse normalized, otherwise total energy will be scaled back
-  shared_interactions: False  # if True parameters of interaction blocks will be shared.
-  normalize_filter: False     #
-  return_latent: True         # if True, the latent space will be returned for the future investigation
-  double_update_latent: False #
-  layer_norm: False           # normalize hidden layer with a 1D layer_norm function
-  aggregration: sum           # aggregration function to use if the prediction may not be represented as the sum of atomic components. 
-                              # Options are: sum, mean, max
+  pretrained_model: null      # The path to the pre-trained model. If None, train from scratch. Default: None.
+  n_features: 32             # Number of features in the latent layer. Default: 128.
+  n_basis: 20                 # Number of radial basis functions for edge description. Default: 20.
+  cutoff_network: poly        # The cutoff function. Default: 'poly'.
+  n_interactions: 3           # Number of message passing layers. Default: 3.
+  share_interactions: False   # Whether to share the weights of the message passing layers. Default: False.
+  double_update_node: False   # Whether to update the invariant node twice in each message passing layer. Default: False.
+  layer_norm: False           # Whether to use layer normalization after message passing. Default: False.
+  activation: swish           # Activation function. Default: 'swish'.
+  infer_properties: ['energy', 'forces', 'hessian']    # The properties to predict. Default: [].
+  train_normalizer: False     # Whether the normalizers are trainable. Default: False.
+  dropout: 0.0                # Dropout between 0 and 1. Default: 0.0.
 
 training:
-  epochs: 5000                # number of times the entire training data will be shown to the model
-  tr_batch_size: 12           # number of training points (snapshots) in a batch of data that is feed to the model
-  val_batch_size: 12          # number of validation points (snapshots) in a batch of data that is feed to the model
-  tr_rotations: 0             # number of times the training data needs to be randomly rotated (redundant for NewtonNet model)
-  val_rotations: 0            # number of times the validation data needs to be randomly rotated (redundant for NewtonNet model)
-  tr_frz_rot: False           # if True, fixed rotations matrix will be used at each epoch
-  val_frz_rot: False          #
-  tr_keep_original: True      # if True, the original orientation of data will be preserved as part of training set (beside other rotations)
-  val_keep_original: True     #
-  shuffle: True               # shuffle training data before each epoch
-  drop_last: True             # if True, drop the left over data points that are less than a full batch size
-  lr: 1.0e-3                  # learning rate
-  lr_scheduler: [plateau, 15, 30, 0.7, 1.0e-6]    # the learning rate decay based on the plateau algorithm: n_epoch_averaging, patience, decay_rate, stop_lr
-#  lr_scheduler: [decay, 0.05]                    # the learning rate decay based on exponential decay: the rate of decay
-  weight_decay: 0             # the l2 norm
-  dropout: 0.0                # dropout between 0 and 1
-
-hooks:
-  vismolvector3d: False       # if the latent force vectors need to be visualized (only works when the return_latent is on)
+  loss: 'energy/forces'       # The loss functions to use for training and evaluation. Default: None.
+  loss_kwargs:                # The keyword arguments for the loss function.
+    w_energy: 1.0             # The weight for the energy loss. Default: 0.0.
+    w_force: 0.0              # The weight for the force loss. Default: 0.0.
+    # wf_decay: 0.0             # The rate of exponential decay of force wight by training epoch
+    w_force_mag: 0.0              # The weight for the force magnitude loss. Default: 0.0.
+    w_force_dir: 0.0              # The weight for the force direction loss. Default: 0.0.
+  optimizer: 'adam'           # The optimizer to use for training. Default: 'adam'.
+  optimizer_kwargs:           # The keyword arguments for the optimizer.
+    lr: 1.0e-4                # The learning rate. Default: 1.0e-3.
+    weight_decay: 0.0         # The weight decay (L2 penalty). Default: 0.0.
+  lr_scheduler: 'plateau'     # The learning rate scheduler to use for training. Default: 'plateau'.
+  lr_scheduler_kwargs:        # The keyword arguments for the learning rate scheduler.
+    patience: 30              # Number of epochs with no improvement after which learning rate will be reduced. Default: 10.
+    factor: 0.7               # Factor by which the learning rate will be reduced. Default: 0.1.
+    min_lr: 1.0e-6            # The minimum learning rate. Default: 0.0.
+  epochs: 300                 # The number of training epochs. Default: 100.
+  dropout: 0.0                # Dropout between 0 and 1. Default: 0.0.
+  clip_grad: 0.0              # Clip the gradient norm to this value. If 0.0, do not clip the gradient. Default: 0.0.
+  train_batch_size: 10        # The batch size for training. Default: 32.
+  val_batch_size: 100         # The batch size for validation. Default: 32.
+  test_batch_size: 100        # The batch size for testing. Default: 32.
 
 checkpoint:
-  log: 1                      # log the results every this many epochs
-  val: 1                      # evaluate the performance on the validation set every this many epochs
-  test: 1                     # evaluate the performance on the test set every this many epochs
-  model: 100                  # save the model every this many epochs
-  verbose: False              # verbosity of the logging
-
-
-
+  resume_training: null       # The path to the checkpoint to resume training. If None, train from scratch. Default: None.
+  log: 10                     # The interval in epochs for logging the training progress. Default: 1.
+  val: 1                      # The interval in epochs for validation. Default: 1.
+  test: 1000                  # The interval in epochs for testing. Default: 1.
+  model: 10                   # The interval in epochs for saving the model (must be validated first). Default: 1.
+  verbose: False              # Whether to print the training progress. Default: False.
 
