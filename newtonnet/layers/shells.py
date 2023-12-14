@@ -24,13 +24,14 @@ class ShellProvider(nn.Module):
         super(ShellProvider, self).__init__()
         self.cutoff = cutoff
         self.pbc = pbc
-        self.cell = cell
-        shift_cells = torch.tensor(
-            [[[[i, j, k] for i in (-1., 0., 1.)] for j in (-1., 0., 1.)] for k in (-1., 0., 1.)],
-            device=self.cell.device,
-            ).reshape((27, 3))    # 27, 3
-        self.shift_vectors = shift_cells @ self.cell    # 27, 3
-        self.orthorhombic = (cell[0] @ cell[1]) == (cell[1] @ cell[2]) == (cell[2] @ cell[0]) == 0.0    # cubic, tetragonal, or orthorhombic
+        if self.pbc:
+            self.cell = cell
+            shift_cells = torch.tensor(
+                [[[[i, j, k] for i in (-1., 0., 1.)] for j in (-1., 0., 1.)] for k in (-1., 0., 1.)],
+                device=self.cell.device,
+                ).reshape((27, 3))    # 27, 3
+            self.shift_vectors = shift_cells @ self.cell    # 27, 3
+            self.orthorhombic = (cell[0] @ cell[1]) == (cell[1] @ cell[2]) == (cell[2] @ cell[0]) == 0.0    # cubic, tetragonal, or orthorhombic
         self.epsilon = 1.0e-8
 
     # def gather_neighbors_sparse(self, input, neighbor_mask):

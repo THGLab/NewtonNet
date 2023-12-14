@@ -110,15 +110,7 @@ class NewtonNet(nn.Module):
                 assert output_layer.dependent_property in self.output_layers.keys(), f'cannot find dependent property {output_layer.dependent_property}'
                 self.output_layers[output_layer.dependent_property].requires_dr = True
 
-    def forward(
-            self,
-            atomic_numbers: torch.Tensor,
-            positions: torch.Tensor,
-            atom_mask: torch.Tensor,
-            neighbor_mask: torch.Tensor,
-            distances: torch.Tensor,
-            distance_vectors: torch.Tensor,
-            ):
+    def forward(self, atomic_numbers, positions, atom_mask, neighbor_mask, distances, distance_vectors):
         '''
         Network forward pass
 
@@ -154,7 +146,7 @@ class NewtonNet(nn.Module):
             'atom_mask': atom_mask,
             }
         for key, output_layer in self.output_layers.items():
-            output, output_normalized = output_layer(outputs)
+            output, output_normalized = output_layer(**outputs)
             outputs[key] = output
             outputs[key + '_normalized'] = output_normalized
 
@@ -178,7 +170,7 @@ class EmbeddingNet(nn.Module):
 
         # atomic embedding
         self.n_features = n_features
-        self.node_embedding = nn.Embedding(embedded_atomic_numbers.max().item() + 1, n_features, device=device)
+        self.node_embedding = nn.Embedding(embedded_atomic_numbers.max() + 1, n_features, device=device)
         for z in range(embedded_atomic_numbers.max() + 1):
             if z not in embedded_atomic_numbers:
                 self.node_embedding.weight.data[z] = torch.nan
@@ -254,9 +246,6 @@ class InteractionNet(nn.Module):
         )
         self.equivariant_selfupdate_coefficient = nn.Sequential(
             nn.Linear(n_features, n_features),
-        )
-        self.equivariant_selfupdate_coefficient = nn.Sequential(
-            nn.Linear(n_features, n_features),
             activation,
             nn.Linear(n_features, n_features),
         )
@@ -275,7 +264,8 @@ class InteractionNet(nn.Module):
         self.double_update_node = double_update_node
 
         self.layer_norm = layer_norm
-        self.norm = nn.LayerNorm(n_features)
+        if self.layer_norm:
+            self.norm = nn.LayerNorm(n_features)
     
     def forward(self, invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr, invariant_edge, neighbor_mask, distances, distance_vectors):
         # map decomposed distances
