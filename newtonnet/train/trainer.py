@@ -10,7 +10,6 @@ import torch
 from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from newtonnet.models.newtonnet import NewtonNet
 from newtonnet.train.loss import get_loss_by_string
 
 
