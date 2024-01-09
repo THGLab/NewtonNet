@@ -1,4 +1,4 @@
-from torch.optim import Adam, SGD, RMSprop
+from torch.optim import Adam, SGD, RMSprop, AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 
 
@@ -28,6 +28,8 @@ def get_optimizer_by_string(optimizer_name, parameters, **kwargs):
         optimizer = SGD(parameters, **kwargs)
     elif optimizer_name == 'rmsprop':
         optimizer = RMSprop(parameters, **kwargs)
+    elif optimizer_name == 'adamw':
+        optimizer = AdamW(parameters, **kwargs)
     else:
         raise ValueError(f'optimizer {optimizer_name} is not supported')
     return optimizer
