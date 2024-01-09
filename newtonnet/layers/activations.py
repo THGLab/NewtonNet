@@ -23,6 +23,8 @@ def get_activation_by_string(key):
         activation = nn.GELU()
     elif key == 'ssp':
         activation = ShiftedSoftplus()
+    elif key == 'swiglu':
+        activation = SwiGLU()
     else:
         raise NotImplementedError("The activation function '%s' is unknown."%str(key))
     return activation
@@ -43,3 +45,19 @@ class ShiftedSoftplus(nn.Module):
 
     def forward(self, x):
         return self.softplus(x) - self.shift
+    
+class SwiGLU(nn.Module):
+    '''
+    Compute gated swish activation function.
+
+    Notes:
+        y = gate(x) * out(x) = swish(linear(x)) * linear(x)
+    '''
+    def __init__(self, in_features, out_features):
+        super(SwiGLU, self).__init__()
+        self.linear1 = nn.Linear(in_features, out_features)
+        self.linear2 = nn.Linear(in_features, out_features)
+        self.gate = nn.SiLU()
+
+    def forward(self, x):
+        return self.gate(self.linear1(x)) * self.linear2(x)
