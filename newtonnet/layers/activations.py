@@ -48,7 +48,7 @@ class ShiftedSoftplus(nn.Module):
     
 class SwiGLU(nn.Module):
     '''
-    Compute gated swish activation function.
+    Compute swish-gated activation function.
 
     Notes:
         y = gate(x) * out(x) = swish(linear(x)) * linear(x)
