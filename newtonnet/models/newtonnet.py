@@ -61,7 +61,6 @@ class NewtonNet(nn.Module):
             embedded_atomic_numbers=embedded_atomic_numbers,
             n_basis=n_basis,
             shell=shell,
-            device=device,
             )
 
         # message passing
@@ -109,6 +108,9 @@ class NewtonNet(nn.Module):
             if isinstance(output_layer, SecondDerivativeProperty):
                 assert output_layer.dependent_property in self.output_layers.keys(), f'cannot find dependent property {output_layer.dependent_property}'
                 self.output_layers[output_layer.dependent_property].requires_dr = True
+        
+        # device
+        self.to(device)
 
     def forward(self, atomic_numbers, positions, atom_mask, neighbor_mask, distances, distance_vectors):
         '''
@@ -162,15 +164,14 @@ class EmbeddingNet(nn.Module):
         embedded_atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
         n_basis (int): Number of radial basis functions.
         shell (nn.Module): The shell module.
-        device (torch.device): The device to run the network.
     '''
-    def __init__(self, n_features, embedded_atomic_numbers, n_basis, shell, device):
+    def __init__(self, n_features, embedded_atomic_numbers, n_basis, shell):
 
         super(EmbeddingNet, self).__init__()
 
         # atomic embedding
         self.n_features = n_features
-        self.node_embedding = nn.Embedding(embedded_atomic_numbers.max() + 1, n_features, device=device)
+        self.node_embedding = nn.Embedding(embedded_atomic_numbers.max() + 1, n_features)
         for z in range(embedded_atomic_numbers.max() + 1):
             if z not in embedded_atomic_numbers:
                 self.node_embedding.weight.data[z] = torch.nan
@@ -178,7 +179,7 @@ class EmbeddingNet(nn.Module):
 
         # edge embedding
         self.shell = shell
-        self.edge_embedding = RadialBesselLayer(n_basis, shell.cutoff, device=device)
+        self.edge_embedding = RadialBesselLayer(n_basis, shell.cutoff)
         self.epsilon = 1.0e-8
 
     def forward(self, atomic_numbers, positions, neighbor_mask, distances, distance_vectors):
