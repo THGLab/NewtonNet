@@ -16,37 +16,10 @@ class BatchDataset(Dataset):
     """
     def __init__(self, input, device):
 
-        self.R = torch.tensor(input['R'],
-                                  device=device,
-                                  # dtype=torch.float64
-                              )
-
-        self.Z = torch.tensor(input['Z'],
-                                           dtype=torch.long,
-                                           device=device)
-        self.E = torch.tensor(input['E'],
-                                   # dtype=torch.float64,
-                                   device=device)
-        self.F = torch.tensor(input['F'],
-                                   # dtype=torch.float64,
-                                   device=device)
-        self.AM = torch.tensor(input['AM'],
-                                dtype=torch.long,
-                                device=device)
-        if 'NM' in input and input['NM'] is not None:
-            self.N = torch.tensor(input['N'],
-                                   dtype=torch.long,
-                                   device=device)
-            self.NM = torch.tensor(input['NM'],
-                                   dtype=torch.long,
-                                   device=device)
-
-        # rotation matrix
-        self.RM = None
-        if 'RM' in input and input['RM'] is not None:
-            self.RM = torch.tensor(input['RM'],
-                                   # dtype=torch.float64,
-                                   device=device)
+        for k, v in input.items():
+            if isinstance(v, np.ndarray):
+                input[k] = torch.tensor(v, device=device)
+            input[k] = input[k].to(device)
 
     def __getitem__(self, index):
 
@@ -68,76 +41,11 @@ class BatchDataset(Dataset):
 
 
 def batch_dataset_converter(input, device):
-    result = {}
-    result["R"] = torch.tensor(input['R'],
-                                  # dtype=torch.float64,
-                                   device=device)
-
-    result["Z"] = torch.tensor(input['Z'],
-                                           dtype=torch.long,
-                                   device=device)
-    if "E" in input:
-        result["E"] = torch.tensor(input['E'],
-                                   dtype=torch.float32,
-                                   device=device)
-    if "F" in input:
-        result["F"] = torch.tensor(input['F'],
-                                    dtype=torch.float32,
-                                    device=device)
-    else:
-        result["F"] = None
-    if "CS" in input:
-        result["CS"] = torch.tensor(input['CS'],
-                                    dtype=torch.float32,
-                                    device=device)
-    if "cs_scaler" in input:
-        cs_scaler = input['cs_scaler']
-        cs_scaler[cs_scaler == 0] = 1 
-        result["cs_scaler"] = torch.tensor(input['cs_scaler'],
-                                    dtype=torch.float32,
-                                    device=device)
-
-    if "M" in input:
-        result["M"] = torch.tensor(input['M'],
-                                dtype=torch.long,
-                                device=device)
-    result["AM"] = torch.tensor(input['AM'],
-                                dtype=torch.long,
-                                   device=device)
-    if 'NM' in input and input['NM'] is not None:
-        result["N"] = torch.tensor(input['N'],
-                                   dtype=torch.long,
-                                   device=device)
-        result["NM"] = torch.tensor(input['NM'],
-                                   dtype=torch.long,
-                                   device=device)
-    
-    if 'lattice' in input:
-        result['lattice'] = torch.tensor(input['lattice'],
-                                         device=device)
-    if 'D' in input:
-        result['D'] = torch.tensor(input['D'],
-                                    device=device)
-
-    if 'V' in input:
-        result['V'] = torch.tensor(input['V'],
-                                    device=device)
-
-    if 'NA' in input:
-        result['NA'] = torch.tensor(input['NA'],
-                                    dtype=torch.long,
-                                    device=device)
-
-    # rotation matrix
-    result["RM"] = None
-    if 'RM' in input and input['RM'] is not None:
-        result["RM"] = torch.tensor(input['RM'],
-                                # dtype=torch.float64,
-                                   device=device)
-
-    if "labels" in input:
-        result["labels"] = input["labels"]
-    return result
+    for k, v in input.items():
+        if isinstance(v, np.ndarray):
+            input[k] = torch.tensor(v)
+        input[k] = input[k].to(device)
+    return input
 
 
 def extensive_train_loader(data,
