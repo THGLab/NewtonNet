@@ -18,7 +18,7 @@ class MLAseCalculator(Calculator):
     implemented_properties = ['energy', 'forces', 'hessian']
 
     ### Constructor ###
-    def __init__(self, model_path, settings_path, hess_method=None, hess_precision=None, disagreement='std', device='cpu', **kwargs):
+    def __init__(self, model_path, settings_path, hess_method=None, hess_precision=None, disagreement='std', device='cpu', dtype='float', **kwargs):
         """
         Constructor for MLAseCalculator
 
@@ -65,7 +65,11 @@ class MLAseCalculator(Calculator):
 
         self.disagreement = disagreement
 
-        torch.set_default_tensor_type(torch.DoubleTensor)
+        # torch.set_default_tensor_type(torch.DoubleTensor)
+        if dtype == 'float':
+            self.dtype = torch.float
+        elif dtype == 'double':
+            self.dtype = torch.double
         if type(model_path) is list:
             self.models = [self.load_model(model_path_, settings_path_) for model_path_, settings_path_ in zip(model_path, settings_path)]
         else:
@@ -171,6 +175,7 @@ class MLAseCalculator(Calculator):
         model.load_state_dict(torch.load(model_path, map_location=self.device[0])['model_state_dict'], )
         model = model
         model.to(self.device[0])
+        model.to(self.dtype)
         model.eval()
         return model
     
@@ -229,6 +234,7 @@ class MLAseCalculator(Calculator):
         N, NM, AM, _, _ = ExtensiveEnvironment().get_environment(data['R'], data['Z'])
         batch.update({'N': N, 'NM': NM, 'AM': AM})
         batch = batch_dataset_converter(batch, device=device)
+        batch['R'] = batch['R'].to(self.dtype)
         return batch
     
 
