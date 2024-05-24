@@ -8,7 +8,7 @@ Each Molecule is represented as a dictionary with following keys:
     - mol_prop: molecular property with shape (1, n_mol_prop)
 
 """
-import numpy as np
+import torch
 from ase import Atoms
 from ase.neighborlist import neighbor_list
 
@@ -70,19 +70,26 @@ class ExtensiveEnvironment(object):
         self._check_shapes(positions.shape, atomic_numbers.shape)
 
         # 2d array of all indices for all atoms in a single data point
-        N = np.tile(np.arange(n_atoms), (n_atoms, 1))  # (A, A)
+        # N = np.tile(np.arange(n_atoms), (n_atoms, 1))  # (A, A)
+        N = torch.arange(n_atoms, device=atomic_numbers.device).repeat(n_atoms, 1)  # (A, A)
 
         # remove the diagonal self indices
-        neighbors = N[~np.eye(n_atoms, dtype=bool)].reshape(n_atoms,
-                                                        -1)  # (A, A-1)
-        neighbors = np.repeat(neighbors[np.newaxis, ...], n_data, axis=0)  # (D, A, A-1)
+        # neighbors = N[~np.eye(n_atoms, dtype=bool)].reshape(n_atoms,
+        #                                                 -1)  # (A, A-1)
+        neighbors = N[~torch.eye(n_atoms, dtype=bool)].reshape(n_atoms, -1)  # (A, A-1)
+        # neighbors = np.repeat(neighbors[np.newaxis, ...], n_data, axis=0)  # (D, A, A-1)
+        neighbors = neighbors.repeat(n_data, 1, 1)  # (D, A, A-1)
 
         # mask based on zero atomic_numbers
-        mask = np.ones_like(atomic_numbers)                 #(D, A)
-        mask[np.where(atomic_numbers == 0)] = 0
-        max_atoms = np.sum(mask, axis=1)
+        # mask = np.ones_like(atomic_numbers)                 #(D, A)
+        mask = torch.ones_like(atomic_numbers)                 #(D, A)
+        # mask[np.where(atomic_numbers == 0)] = 0
+        mask[atomic_numbers == 0] = 0
+        # max_atoms = np.sum(mask, axis=1)
+        max_atoms = mask.sum(dim=1)
 
-        neighbor_mask = (neighbors < np.tile(max_atoms.reshape(-1,1), n_atoms-1)[:,None,:]).astype('int')
+        # neighbor_mask = (neighbors < np.tile(max_atoms.reshape(-1,1), n_atoms-1)[:,None,:]).astype('int')
+        neighbor_mask = (neighbors < max_atoms.reshape(-1,1).repeat(1, n_atoms-1).unsqueeze(1)).int()  # (A, A-1)
         neighbor_mask *= mask[:,:,None]  # (D,A,A-1)
         neighbors *= neighbor_mask  # (D,A,A-1)
 
