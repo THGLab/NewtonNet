@@ -81,7 +81,8 @@ class MLAseCalculator(Calculator):
         data = self.extensive_data_loader(data=self.data_formatter(atoms), device=self.device[0])
         energy = np.zeros((len(self.models), 1))
         forces = np.zeros((len(self.models), data['R'].shape[1], 3))
-        hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
+        if self.hess_method is not None:
+            hessian = np.zeros((len(self.models), data['R'].shape[1], 3, data['R'].shape[1], 3))
         if self.hess_method=='autograd':
             for model_, model in enumerate(self.models):
                 #pred_E = lambda R: self.model(dict(data, R=R))
@@ -131,24 +132,31 @@ class MLAseCalculator(Calculator):
         self.results['outlier'] = self.q_test(energy)
         self.results['energy'] = self.remove_outlier(energy, self.results['outlier']).mean()
         self.results['forces'] = self.remove_outlier(forces, self.results['outlier']).mean(axis=0)
-        self.results['hessian'] = self.remove_outlier(hessian, self.results['outlier']).mean(axis=0)
+        if self.hess_method is not None:
+            self.results['hessian'] = self.remove_outlier(hessian, self.results['outlier']).mean(axis=0)
         if self.disagreement=='std':
             self.results['energy_disagreement'] = energy.std()
             self.results['forces_disagreement'] = forces.std(axis=0).max()
-            self.results['hessian_disagreement'] = hessian.std(axis=0).max()
+            if self.hess_method is not None:
+                self.results['hessian_disagreement'] = hessian.std(axis=0).max()
         elif self.disagreement=='std_outlierremoval':
             self.results['energy_disagreement'] = self.remove_outlier(energy, self.results['outlier']).std()
             self.results['forces_disagreement'] = self.remove_outlier(forces, self.results['outlier']).std(axis=0).max()
-            self.results['hessian_disagreement'] = self.remove_outlier(hessian, self.results['outlier']).std(axis=0).max()
+            if self.hess_method is not None:
+                self.results['hessian_disagreement'] = self.remove_outlier(hessian, self.results['outlier']).std(axis=0).max()
         elif self.disagreement=='range':
             self.results['energy_disagreement'] = (energy.max() - energy.min())
             self.results['forces_disagreement'] = (forces.max(axis=0) - forces.min(axis=0)).max()
-            self.results['hessian_disagreement'] = (hessian.max(axis=0) - hessian.min(axis=0)).max()
+            if self.hess_method is not None:
+                self.results['hessian_disagreement'] = (hessian.max(axis=0) - hessian.min(axis=0)).max()
         elif self.disagreement=='values':
             self.results['energy_disagreement'] = energy
             self.results['forces_disagreement'] = forces
-            self.results['hessian_disagreement'] = hessian
-        del energy, forces, hessian
+            if self.hess_method is not None:
+                self.results['hessian_disagreement'] = hessian
+        del energy, forces
+        if self.hess_method is not None:
+            del hessian
 
 
     def load_model(self, model_path, settings_path):
