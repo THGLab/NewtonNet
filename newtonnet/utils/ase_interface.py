@@ -134,26 +134,36 @@ class MLAseCalculator(Calculator):
         self.results['forces'] = self.remove_outlier(forces, self.results['outlier']).mean(axis=0)
         if self.hess_method is not None:
             self.results['hessian'] = self.remove_outlier(hessian, self.results['outlier']).mean(axis=0)
+        else:
+            self.results['hessian'] = None
         if self.disagreement=='std':
             self.results['energy_disagreement'] = energy.std()
             self.results['forces_disagreement'] = forces.std(axis=0).max()
             if self.hess_method is not None:
                 self.results['hessian_disagreement'] = hessian.std(axis=0).max()
+            else:
+                self.results['hessian_disagreement'] = None
         elif self.disagreement=='std_outlierremoval':
             self.results['energy_disagreement'] = self.remove_outlier(energy, self.results['outlier']).std()
             self.results['forces_disagreement'] = self.remove_outlier(forces, self.results['outlier']).std(axis=0).max()
             if self.hess_method is not None:
                 self.results['hessian_disagreement'] = self.remove_outlier(hessian, self.results['outlier']).std(axis=0).max()
+            else:
+                self.results['hessian_disagreement'] = None
         elif self.disagreement=='range':
             self.results['energy_disagreement'] = (energy.max() - energy.min())
             self.results['forces_disagreement'] = (forces.max(axis=0) - forces.min(axis=0)).max()
             if self.hess_method is not None:
                 self.results['hessian_disagreement'] = (hessian.max(axis=0) - hessian.min(axis=0)).max()
+            else:
+                self.results['hessian_disagreement'] = None
         elif self.disagreement=='values':
             self.results['energy_disagreement'] = energy
             self.results['forces_disagreement'] = forces
             if self.hess_method is not None:
                 self.results['hessian_disagreement'] = hessian
+            else:
+                self.results['hessian_disagreement'] = None
         del energy, forces
         if self.hess_method is not None:
             del hessian
