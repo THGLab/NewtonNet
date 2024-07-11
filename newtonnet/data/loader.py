@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 
-from newtonnet.data import NeighborEnvironment
+# from newtonnet.data import NeighborEnvironment
 from newtonnet.layers.scalers import Normalizer
 
 
