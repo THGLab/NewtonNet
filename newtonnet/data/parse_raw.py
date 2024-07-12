@@ -1,52 +1,26 @@
 import numpy as np
-
 import torch
-from torch.nn import ModuleDict
 from torch.utils.data import random_split
-from torch.utils.data import DataLoader
+from torch_geometric.loader import DataLoader
 
 from newtonnet.data import MolecularDataset
 from newtonnet.layers.scalers import get_normalizer_by_string
 
 
-def split(data, data_sizes):
-    '''
-    Split data into train, val, and test sets.
-
-    Args:
-        data (torch.utils.data.Dataset): The data to be split.
-        data_sizes (tuple): The sizes of the train, val, and test sets.
-
-    Returns:
-        train_data (torch.utils.data.Subset): The training data.
-        val_data (torch.utils.data.Subset): The validation data.
-        test_data (torch.utils.data.Subset): The test data.
-    '''
-    train_size, val_size, test_size = data_sizes
-    train_size = len(data) if train_size == -1 else train_size
-    val_size = len(data) if val_size == -1 else val_size
-    test_size = len(data) if test_size == -1 else test_size
-
-    train_data, val_data, test_data, _ = random_split(data, [train_size, val_size, test_size, len(data)-train_size-val_size-test_size])
-
-    return train_data, val_data, test_data
-
 def parse_train_test(
         train_path: str = None,
         val_path: str = None,
         test_path: str = None,
-        train_size: int = -1,
-        val_size: int = -1,
-        test_size: int = -1,
+        train_size: int = None,
+        val_size: int = None,
+        test_size: int = None,
         train_batch_size: int = 32,
         val_batch_size: int = 32,
         test_batch_size: int = 32,
-        train_properties: list = ['energy', 'forces'],
-        pbc: bool = False,
-        cell: torch.tensor = torch.zeros(3, 3),
-        cutoff: float = 5.0,
-        device: torch.device = torch.device('cpu'),
-        precision: torch.dtype = torch.float32,
+        transform: callable = None,
+        pre_transform: callable = None,
+        pre_filter: callable = None,
+        force_reload: bool = False,
         ):
     '''
     Parse the training, validation, and test data.
@@ -55,113 +29,76 @@ def parse_train_test(
         train_path (str): The path to the training data.
         val_path (str): The path to the validation data. If None, use the training data. Default: None.
         test_path (str): The path to the test data. If None, use the validation data. Default: None.
-        train_size (int): The size of the training set. If -1, use all data. Default: -1.
-        val_size (int): The size of the validation set. If -1, use all data. Default: -1.
-        test_size (int): The size of the test set. If -1, use all data. Default: -1.
+        train_size (int): The size of the training set. If None, use all data. Default: None.
+        val_size (int): The size of the validation set. If None, use all data. Default: None.
+        test_size (int): The size of the test set. If None, use all data. Default: None.
         train_batch_size (int): The batch size for training. Default: 32.
         val_batch_size (int): The batch size for validation. Default: 32.
         test_batch_size (int): The batch size for testing. Default: 32.
-        properties (list): The properties to be trained. Default: ['energy', 'forces'].
-        pbc (bool): Whether to use periodic boundary. Default: False.
-        cell (torch.tensor): The unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]].
-        cutoff (float): The cutoff radius. Default: 5.0.
-        device (torch.device): The device to use. Default: torch.device('cpu').
-        precision (torch.dtype): The precision of the model. Default: torch.float32.
+        transform (callable): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before every access. Default: None.
+        pre_transform (callable): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before being saved to disk. Default: None.
+        pre_filter (callable): A function that takes in a data object and returns a boolean value, indicating whether the data object should be included in the final dataset. Default: None.
+        force_reload (bool): Whether to re-process the dataset. Default: False.
 
     Returns:
         train_gen (torch.utils.data.DataLoader): The training data loader.
         val_gen (torch.utils.data.DataLoader): The validation data loader.
         test_gen (torch.utils.data.DataLoader): The test data loader.
-        embedded_atomic_numbers (torch.tensor): The embedded atomic numbers.
-        normalizers (nn.ModuleDict): The normalizers for each property.
-        shell (nn.Module): The neighbor environment.
     '''
-    # environment
-    print('Environment:')
-    environment = NeighborEnvironment(cutoff=cutoff, pbc=pbc, cell=cell)
-    shell = environment.shell
-    print(f'distance cutoff: {environment.shell.cutoff}')
-    print(f'periodic boundary: {environment.shell.pbc}')
-    if environment.shell.pbc:
-        print(f'  unit cell size: {environment.shell.cell.tolist()}')
-    print()
 
     print('Data:')
     # meta data
-    assert train_path is not None, 'train_path is required'
-    train_path = train_path
-    val_path = val_path or train_path
-    test_path = test_path or val_path
-
-    # load data
-    if train_path == val_path == test_path:
-        print('use training data for validation and test')
-        train_data = MolecularDataset(np.load(train_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        train_data, val_data, test_data = split(train_data, (train_size, val_size, test_size))
-    elif train_path == val_path:
-        print('use training data for validation')
-        train_data = MolecularDataset(np.load(train_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        train_data, val_data = split(train_data, (train_size, val_size, 0))
-        test_data = MolecularDataset(np.load(test_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        _, _, test_data = split(test_data, (0, 0, test_size))
-    elif train_path == test_path:
-        print('use training data for test')
-        train_data = MolecularDataset(np.load(train_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        train_data, _, test_data = split(train_data, (train_size, 0, test_size))
-        val_data = MolecularDataset(np.load(val_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        _, val_data, _ = split(val_data, (0, val_size, 0))
-    elif val_path == test_path:
-        print('use validation data for test')
-        train_data = MolecularDataset(np.load(train_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        train_data, _, _, = split(train_data, (train_size, 0, 0))
-        val_data = MolecularDataset(np.load(val_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        _, val_data, test_data = split(val_data, (0, val_size, test_size))
+    if train_path is not None:
+        train_data = MolecularDataset(root=train_path, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
+        # print(f'load {len(train_data)} data from {train_path}')
+        train_size = len(train_data) if train_size is None else train_size
+        train_data, left_data = random_split(train_data, [train_size, len(train_data) - train_size])
     else:
-        print('use separate training, validation, and test data')
-        train_data = MolecularDataset(np.load(train_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        train_data, _, _ = split(train_data, (train_size, 0, 0))
-        val_data = MolecularDataset(np.load(val_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        _, val_data, _ = split(val_data, (0, val_size, 0))
-        test_data = MolecularDataset(np.load(test_path), properties=train_properties, environment=environment, device=device, precision=precision)
-        _, _, test_data = split(test_data, (0, 0, test_size))
+        raise ValueError('train_path must be provided')
+    if val_path is not None:
+        val_data = MolecularDataset(root=val_path, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
+        # print(f'load {len(val_data)} data from {val_path}')
+        val_size = len(val_data) if val_size is None else val_size
+        val_data, left_data = random_split(val_data, [val_size, len(val_data) - val_size])
+    elif val_size is not None:
+        val_data, left_data = random_split(left_data, [val_size, len(left_data) - val_size])
+    else:
+        val_data, left_data = random_split(left_data, [0, len(left_data)])
+    if test_path is not None:
+        test_data = MolecularDataset(root=test_path, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
+        # print(f'load {len(test_data)} data from {test_path}')
+        test_size = len(test_data) if test_size is None else test_size
+        test_data, left_data = random_split(test_data, [test_size, len(test_data) - test_size])
+    elif test_size is not None:
+        test_data, left_data = random_split(left_data, [test_size, len(left_data) - test_size])
+    else:
+        test_data, _ = random_split(left_data, [0, len(left_data)])
     print(f'data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
 
     # create data loader
-    train_gen = DataLoader(
-        dataset=train_data,
-        batch_size=train_batch_size,
-        shuffle=True,
-        )
-    val_gen = DataLoader(
-        dataset=val_data,
-        batch_size=val_batch_size,
-        shuffle=False,
-        )
-    test_gen = DataLoader(
-        dataset=test_data,
-        batch_size=test_batch_size,
-        shuffle=False,
-        )
+    train_gen = DataLoader(dataset=train_data, batch_size=train_batch_size, shuffle=True)
+    val_gen = DataLoader(dataset=val_data, batch_size=val_batch_size, shuffle=False)
+    test_gen = DataLoader(dataset=test_data, batch_size=test_batch_size, shuffle=False)
     print(f'batch size (train, val, test): {train_batch_size}, {val_batch_size}, {test_batch_size}')
 
-    # extract data stats
-    print('embedded atomic numbers:')
-    embedded_atomic_numbers = torch.unique(train_data.dataset.atomic_numbers[train_data.indices])
-    embedded_atomic_numbers = embedded_atomic_numbers[embedded_atomic_numbers > 0]
-    print(f'  {embedded_atomic_numbers.tolist()}')
-    print('normalizers:')
-    normalizers = {}
-    for key in train_properties:
-        normalizer = get_normalizer_by_string(
-            key=key,
-            data=train_data.dataset.get(key)[train_data.indices],
-            atomic_numbers=train_data.dataset.atomic_numbers[train_data.indices],
-            )
-        normalizers[key] = normalizer
-        print(f'  {key} normalizer: mean {normalizer.mean.data.tolist()}, std {normalizer.std.data.tolist()}')
-    normalizers = ModuleDict(normalizers)
-    for data in [train_data, val_data, test_data]:
-        data.dataset.normalize(normalizers)
-    print()
+    # # extract data stats
+    # print('embedded atomic numbers:')
+    # embedded_atomic_numbers = torch.unique(train_data.dataset.atomic_numbers[train_data.indices])
+    # embedded_atomic_numbers = embedded_atomic_numbers[embedded_atomic_numbers > 0]
+    # print(f'  {embedded_atomic_numbers.tolist()}')
+    # print('normalizers:')
+    # normalizers = {}
+    # for key in train_properties:
+    #     normalizer = get_normalizer_by_string(
+    #         key=key,
+    #         data=train_data.dataset.get(key)[train_data.indices],
+    #         atomic_numbers=train_data.dataset.atomic_numbers[train_data.indices],
+    #         )
+    #     normalizers[key] = normalizer
+    #     print(f'  {key} normalizer: mean {normalizer.mean.data.tolist()}, std {normalizer.std.data.tolist()}')
+    # normalizers = ModuleDict(normalizers)
+    # for data in [train_data, val_data, test_data]:
+    #     data.dataset.normalize(normalizers)
+    # print()
 
-    return train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell
+    return train_gen, val_gen, test_gen

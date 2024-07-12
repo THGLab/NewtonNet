@@ -6,8 +6,6 @@ import numpy as np
 import torch
 from torch_geometric.data import InMemoryDataset, Data
 
-from newtonnet.data.neighbors import RadiusGraph
-
 
 class MolecularDataset(InMemoryDataset):
     def __init__(
@@ -63,4 +61,4 @@ class MolecularDataset(InMemoryDataset):
         self.save(data_list, processed_path)
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({len(self)}')"
+        return f"{self.__class__.__name__}({len(self)})"
