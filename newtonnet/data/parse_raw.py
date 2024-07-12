@@ -77,21 +77,13 @@ def parse_train_test(
     test_gen = DataLoader(dataset=test_data, batch_size=test_batch_size, shuffle=False)
     print(f'batch size (train, val, test): {train_batch_size}, {val_batch_size}, {test_batch_size}')
 
-    # # extract data stats
-    # print('embedded atomic numbers:')
-    # embedded_atomic_numbers = torch.unique(train_data.dataset.atomic_numbers[train_data.indices])
-    # embedded_atomic_numbers = embedded_atomic_numbers[embedded_atomic_numbers > 0]
-    # print(f'  {embedded_atomic_numbers.tolist()}')
+    # extract data stats
+    embedded_atomic_numbers = torch.unique(train_data[:].z)
+    embedded_atomic_numbers = embedded_atomic_numbers[embedded_atomic_numbers > 0]
+    print(f'embedded atomic numbers: {embedded_atomic_numbers.tolist()}')
+    # E0s = torch.linalg.lstsq(train_data[:].energy, torch.ones_like(train_data[:].energy)).solution
     # print('normalizers:')
     # normalizers = {}
-    # for key in train_properties:
-    #     normalizer = get_normalizer_by_string(
-    #         key=key,
-    #         data=train_data.dataset.get(key)[train_data.indices],
-    #         atomic_numbers=train_data.dataset.atomic_numbers[train_data.indices],
-    #         )
-    #     normalizers[key] = normalizer
-    #     print(f'  {key} normalizer: mean {normalizer.mean.data.tolist()}, std {normalizer.std.data.tolist()}')
     # normalizers = ModuleDict(normalizers)
     # for data in [train_data, val_data, test_data]:
     #     data.dataset.normalize(normalizers)
