@@ -1,7 +1,9 @@
 import numpy as np
 import torch
 from torch.utils.data import random_split
+from torch_geometric.utils import one_hot
 from torch_geometric.loader import DataLoader
+from torch_geometric.nn.aggr import SumAggregation
 
 from newtonnet.data import MolecularDataset
 from newtonnet.layers.scalers import get_normalizer_by_string
@@ -72,7 +74,7 @@ def parse_train_test(
     print(f'data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
 
     # create data loader
-    train_gen = DataLoader(dataset=train_data, batch_size=train_batch_size, shuffle=True)
+    train_gen = DataLoader(dataset=train_data, batch_size=train_batch_size, shuffle=False)
     val_gen = DataLoader(dataset=val_data, batch_size=val_batch_size, shuffle=False)
     test_gen = DataLoader(dataset=test_data, batch_size=test_batch_size, shuffle=False)
     print(f'batch size (train, val, test): {train_batch_size}, {val_batch_size}, {test_batch_size}')
@@ -81,7 +83,11 @@ def parse_train_test(
     embedded_atomic_numbers = torch.unique(train_data[:].z)
     embedded_atomic_numbers = embedded_atomic_numbers[embedded_atomic_numbers > 0]
     print(f'embedded atomic numbers: {embedded_atomic_numbers.tolist()}')
-    # E0s = torch.linalg.lstsq(train_data[:].energy, torch.ones_like(train_data[:].energy)).solution
+    for data in DataLoader(dataset=train_data, batch_size=len(train_data), shuffle=False):
+        aggr = SumAggregation()
+        formula = aggr(one_hot(data.z.long()), data.batch)
+        energy_ref = torch.linalg.lstsq(formula, data.energy).solution
+        energy_scale = ((data.energy - torch.matmul(formula, energy_ref)).square().sum() / len(data.z)).sqrt()
     # print('normalizers:')
     # normalizers = {}
     # normalizers = ModuleDict(normalizers)
