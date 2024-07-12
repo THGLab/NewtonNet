@@ -27,11 +27,11 @@ def parse_train_test(
 
     Args:
         train_path (str): The path to the training data.
-        val_path (str): The path to the validation data. If None, use the training data. Default: None.
-        test_path (str): The path to the test data. If None, use the validation data. Default: None.
-        train_size (int): The size of the training set. If None, use all data. Default: None.
-        val_size (int): The size of the validation set. If None, use all data. Default: None.
-        test_size (int): The size of the test set. If None, use all data. Default: None.
+        val_path (str): The path to the validation data. If None, split from the unused training data. Default: None.
+        test_path (str): The path to the test data. If None, split from the unused validation data. Default: None.
+        train_size (int): The size of the training set. If None, use all available data. Default: None.
+        val_size (int): The size of the validation set. If None, use all available data. Default: None.
+        test_size (int): The size of the test set. If None, use all available data. Default: None.
         train_batch_size (int): The batch size for training. Default: 32.
         val_batch_size (int): The batch size for validation. Default: 32.
         test_batch_size (int): The batch size for testing. Default: 32.
@@ -46,33 +46,29 @@ def parse_train_test(
         test_gen (torch.utils.data.DataLoader): The test data loader.
     '''
 
+    # load data
     print('Data:')
-    # meta data
     if train_path is not None:
         train_data = MolecularDataset(root=train_path, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
-        # print(f'load {len(train_data)} data from {train_path}')
-        train_size = len(train_data) if train_size is None else train_size
-        train_data, left_data = random_split(train_data, [train_size, len(train_data) - train_size])
+        print(f'load {len(train_data)} data from {train_path}')
     else:
         raise ValueError('train_path must be provided')
+    train_size = len(train_data) if train_size is None else train_size
+    train_data, left_data = random_split(train_data, [train_size, len(train_data) - train_size])
     if val_path is not None:
         val_data = MolecularDataset(root=val_path, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
-        # print(f'load {len(val_data)} data from {val_path}')
-        val_size = len(val_data) if val_size is None else val_size
-        val_data, left_data = random_split(val_data, [val_size, len(val_data) - val_size])
-    elif val_size is not None:
-        val_data, left_data = random_split(left_data, [val_size, len(left_data) - val_size])
+        print(f'load {len(val_data)} data from {val_path}')
     else:
-        val_data, left_data = random_split(left_data, [0, len(left_data)])
+        val_data = left_data
+    val_size = len(val_data) if val_size is None else val_size
+    val_data, left_data = random_split(val_data, [val_size, len(val_data) - val_size])
     if test_path is not None:
         test_data = MolecularDataset(root=test_path, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
-        # print(f'load {len(test_data)} data from {test_path}')
-        test_size = len(test_data) if test_size is None else test_size
-        test_data, left_data = random_split(test_data, [test_size, len(test_data) - test_size])
-    elif test_size is not None:
-        test_data, left_data = random_split(left_data, [test_size, len(left_data) - test_size])
+        print(f'load {len(test_data)} data from {test_path}')
     else:
-        test_data, _ = random_split(left_data, [0, len(left_data)])
+        test_data = left_data
+    test_size = len(test_data) if test_size is None else test_size
+    test_data, left_data = random_split(test_data, [test_size, len(test_data) - test_size])
     print(f'data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
 
     # create data loader

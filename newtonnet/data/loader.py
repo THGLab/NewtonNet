@@ -61,4 +61,4 @@ class MolecularDataset(InMemoryDataset):
         self.save(data_list, processed_path)
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({len(self)})"
+        return f'{self.__class__.__name__}({len(self)})'
