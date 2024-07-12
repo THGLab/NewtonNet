@@ -1,12 +1,11 @@
 import numpy as np
 import torch
+from torch import nn
 from torch.utils.data import random_split
-from torch_geometric.utils import one_hot
 from torch_geometric.loader import DataLoader
-from torch_geometric.nn.aggr import SumAggregation
 
 from newtonnet.data import MolecularDataset
-from newtonnet.layers.scalers import get_normalizer_by_string
+from newtonnet.layers.scalers import get_scaler_by_string
 
 
 def parse_train_test(
@@ -19,6 +18,7 @@ def parse_train_test(
         train_batch_size: int = 32,
         val_batch_size: int = 32,
         test_batch_size: int = 32,
+        train_properties: list = ['energy', 'forces'],
         transform: callable = None,
         pre_transform: callable = None,
         pre_filter: callable = None,
@@ -37,6 +37,7 @@ def parse_train_test(
         train_batch_size (int): The batch size for training. Default: 32.
         val_batch_size (int): The batch size for validation. Default: 32.
         test_batch_size (int): The batch size for testing. Default: 32.
+        train_properties (list): The properties to be trained. Default: ['energy', 'forces'].
         transform (callable): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before every access. Default: None.
         pre_transform (callable): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before being saved to disk. Default: None.
         pre_filter (callable): A function that takes in a data object and returns a boolean value, indicating whether the data object should be included in the final dataset. Default: None.
@@ -83,16 +84,13 @@ def parse_train_test(
     embedded_atomic_numbers = torch.unique(train_data[:].z)
     embedded_atomic_numbers = embedded_atomic_numbers[embedded_atomic_numbers > 0]
     print(f'embedded atomic numbers: {embedded_atomic_numbers.tolist()}')
-    for data in DataLoader(dataset=train_data, batch_size=len(train_data), shuffle=False):
-        aggr = SumAggregation()
-        formula = aggr(one_hot(data.z.long()), data.batch)
-        energy_ref = torch.linalg.lstsq(formula, data.energy).solution
-        energy_scale = ((data.energy - torch.matmul(formula, energy_ref)).square().sum() / len(data.z)).sqrt()
-    # print('normalizers:')
-    # normalizers = {}
-    # normalizers = ModuleDict(normalizers)
-    # for data in [train_data, val_data, test_data]:
-    #     data.dataset.normalize(normalizers)
-    # print()
+    print('normalizers:')
+    normalizers = {}
+    for property in train_properties:
+        scalers = {}
+        normalizers[property] = get_scaler_by_string(property, train_data)
+        print(f'  {property}: {normalizers[property]}')
+    normalizers = nn.ModuleDict(normalizers)
+    print()
 
     return train_gen, val_gen, test_gen
