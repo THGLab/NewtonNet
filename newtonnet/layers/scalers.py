@@ -1,115 +1,105 @@
 import torch
 from torch import nn
+from torch_geometric.loader import DataLoader
+from torch_geometric.nn import SumAggregation, MeanAggregation, StdAggregation
+from torch_geometric.utils import one_hot
 
 
-def get_normalizer_by_string(key, **kwargs):
+def get_scaler_by_string(key, dataset):
+    loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
+    for data in loader:
+        break
     if key == 'energy':
-        normalizer = GraphPropertyNormalizer(**kwargs)
+        scaler = GraphPropertyScaleShift(data.energy, data.z, data.batch)
     elif key == 'forces':
-        normalizer = NodePropertyNormalizer(**kwargs)
+        scaler = NullScaleShift()
     else:
-        raise ValueError(f'normalizer {key} is not supported')
-    return normalizer
+        raise ValueError(f'scaler {key} is not supported')
+    return scaler
 
 
-class Normalizer(nn.Module):
+class GraphPropertyScaleShift(nn.Module):
     '''
-    Normalizer layer for graph property standardization. 
-    Copied from: https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py under the MIT License.
-
+    Scale and shift layer for graph properties.
+    
     Parameters:
         data (torch.Tensor): The training data to be used for standardization.
-        atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
-    
-    Note:
-        For graph properties, the same scale and shift values are used for all atom types
-        For node properties, each atom type uses its dedicated scale and shift values
+        z (torch.Tensor): The atomic numbers of the atoms in the molecule.
+        batch (torch.Tensor): The batch indices.
+        freeze (bool): Whether to freeze the scale parameter.
     '''
-    def __init__(self, mean, std):
-        super(Normalizer, self).__init__()
-        self.mean = nn.Parameter(mean, requires_grad=False)
-        self.std = nn.Parameter(std, requires_grad=False)
+    def __init__(self, data, z, batch):
+        super(GraphPropertyScaleShift, self).__init__()
+        sum_aggr = SumAggregation()
+        formula = sum_aggr(one_hot(z.long()), batch)    # z count for each graph
+        shift = torch.linalg.lstsq(formula, data).solution
+        scale = ((data - torch.matmul(formula, shift)).square().sum() / len(z)).sqrt()
+        scale = torch.ones_like(shift) * scale
+        
+        self.shift = nn.Embedding.from_pretrained(shift.reshape(-1, 1))
+        self.scale = nn.Parameter(scale.reshape(-1, 1))
 
-    def select(self, atomic_numbers):
-        raise NotImplementedError('This is an abstract class. Use GraphPropertyNormalizer or NodePropertyNormalizer instead.')
-
-    def forward(self, inputs, atomic_numbers):
+    def forward(self, inputs, z):
         '''
-        Normalize inputs.
+        Scale and shift inputs.
 
         Args:
             inputs (torch.Tensor): The input values.
-            atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
+            z (torch.Tensor): The atomic numbers of the atoms in the molecule.
 
         Returns:
             torch.Tensor: The normalized inputs.
         '''
-        selected_mean, selected_std = self.select(atomic_numbers)
-        while selected_mean.ndim < inputs.ndim:
-            selected_mean = selected_mean.unsqueeze(-1)
-            selected_std = selected_std.unsqueeze(-1)
-        outputs = (inputs - selected_mean) / selected_std
+        outputs = input * self.scale + self.shift(z)
         return outputs
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(shift={self.shift.weight.flatten().tolist()}, scale={self.scale.data.flatten().mean().item()})'
     
-    def reverse(self, inputs, atomic_numbers):
+
+class NodePropertyScaleShift(nn.Module):
+    '''
+    Scale and shift layer for node properties.
+    
+    Parameters:
+        data (torch.Tensor): The training data to be used for standardization.
+        z (torch.Tensor): The atomic numbers of the atoms in the molecule.
+        freeze (bool): Whether to freeze the scale parameter.
+    '''
+    def __init__(self, data, z, freeze=False):
+        super(NodePropertyNormalizer, self).__init__(mean, std)
+        mean_aggr = MeanAggregation()
+        shift = mean_aggr(data, z)
+        std_aggr = StdAggregation()
+        scale = std_aggr(data, z) 
+
+        self.shift = nn.Embedding.from_pretrained(shift, freeze=freeze)
+        self.scale = nn.Embedding.from_pretrained(scale, freeze=freeze)
+
+    def forward(self, inputs, z):
         '''
-        Denormalize inputs.
+        Scale and shift inputs.
 
         Args:
-            inputs (torch.Tensor): The normalized input values.
-            numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
+            inputs (torch.Tensor): The input values.
+            z (torch.Tensor): The atomic numbers of the atoms in the molecule.
 
         Returns:
-            torch.Tensor: The denormalized inputs.
+            torch.Tensor: The normalized inputs.
         '''
-        selected_mean, selected_std = self.select(atomic_numbers)
-        while selected_mean.ndim < inputs.ndim:
-            selected_mean = selected_mean.unsqueeze(-1)
-            selected_std = selected_std.unsqueeze(-1)
-        outputs = inputs * selected_std + selected_mean
+        outputs = inputs * self.scale(z) + self.shift(z)
         return outputs
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(shift={self.shift.weight.flatten().tolist()}, scale={self.scale.weight.flatten().tolist()})'
     
 
-class GraphPropertyNormalizer(Normalizer):
+class NullScaleShift(nn.Module):
     '''
-    Normalizer layer for graph properties. 
-    
-    Parameters:
-        data (torch.Tensor): The training data to be used for standardization.
-        atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
-    '''
-    def __init__(self, data, atomic_numbers):
-        mean = data.mean(dim=0)
-        std = data.std(dim=0)
-        super(GraphPropertyNormalizer, self).__init__(mean, std)
-
-    def select(self, atomic_numbers):
-        return self.mean, self.std
-    
-
-class NodePropertyNormalizer(Normalizer):
-    '''
-    Normalizer layer for node properties. 
-    
-    Parameters:
-        data (torch.Tensor): The training data to be used for standardization.
-        atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
-    '''
-    def __init__(self, data, atomic_numbers):
-        max_atomic_number = atomic_numbers.max()
-        mean = torch.tensor([data[atomic_numbers == z].mean() for z in range(max_atomic_number + 1)])
-        std = torch.tensor([data[atomic_numbers == z].std() for z in range(max_atomic_number + 1)])
-        super(NodePropertyNormalizer, self).__init__(mean, std)
-
-    def select(self, atomic_numbers):
-        return self.mean[atomic_numbers], self.std[atomic_numbers]
-    
-class NullNormalizer(Normalizer):
-    '''
-    Null normalizer for untrained properties. Identity function.
+    Null scale and shift layer for untrained properties. Identity function.
     '''
     def __init__(self):
-        super(NullNormalizer, self).__init__(torch.tensor(0.), torch.tensor(1.))
+        super(NullScaleShift, self).__init__()
 
-    def select(self, atomic_numbers):
-        return self.mean, self.std
+    def forward(self, inputs, z):
+        return inputs
