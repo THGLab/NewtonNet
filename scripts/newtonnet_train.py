@@ -8,6 +8,7 @@ import torch
 
 from newtonnet.models import NewtonNet
 from newtonnet.train import Trainer
+from newtonnet.data import RadiusGraph
 from newtonnet.data import parse_train_test
 from newtonnet.layers.precision import set_precison_by_string
 from newtonnet.layers.activations import get_activation_by_string
@@ -47,22 +48,19 @@ else:
 
 # data
 torch.manual_seed(settings['data'].get('random_states', 42))
-train_gen, val_gen, test_gen, embedded_atomic_numbers, normalizers, shell = parse_train_test(
+transform = RadiusGraph(settings['data'].get('cutoff', 5.0))
+train_gen, val_gen, test_gen, scalers = parse_train_test(
     train_path=settings['data'].get('train_path', None),
     val_path=settings['data'].get('val_path', None),
     test_path=settings['data'].get('test_path', None),
     train_properties=settings['data'].get('train_properties', ['energy', 'forces']),
-    pbc=settings['data'].get('pbc', False),
-    cell=settings['data'].get('cell', torch.zeros(3, 3)),
-    cutoff=settings['data'].get('cutoff', 5.0),
+    pre_transform=transform,
     train_size=settings['data'].get('train_size', -1),
     val_size=settings['data'].get('val_size', -1),
     test_size=settings['data'].get('test_size', -1),
     train_batch_size=settings['training'].get('train_batch_size', 32),
     val_batch_size=settings['training'].get('val_batch_size', 32),
     test_batch_size=settings['training'].get('test_batch_size', 32),
-    device=device[0],
-    precision=precision,
     )
 
 # model
