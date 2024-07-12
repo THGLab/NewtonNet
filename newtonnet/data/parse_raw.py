@@ -5,7 +5,7 @@ from torch.nn import ModuleDict
 from torch.utils.data import random_split
 from torch.utils.data import DataLoader
 
-from newtonnet.data import MolecularDataset, NeighborEnvironment
+from newtonnet.data import MolecularDataset
 from newtonnet.layers.scalers import get_normalizer_by_string
 
 
