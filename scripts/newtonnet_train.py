@@ -1,8 +1,10 @@
 #! /usr/bin/env python
 
 import os
+import os.path as osp
 import argparse
 import yaml
+import json
 
 import torch
 
@@ -49,10 +51,10 @@ else:
 # data
 torch.manual_seed(settings['data'].get('random_states', 42))
 transform = RadiusGraph(settings['data'].get('cutoff', 5.0))
-train_gen, val_gen, test_gen, scalers = parse_train_test(
-    train_path=settings['data'].get('train_path', None),
-    val_path=settings['data'].get('val_path', None),
-    test_path=settings['data'].get('test_path', None),
+train_gen, val_gen, test_gen, stats = parse_train_test(
+    train_root=settings['data'].get('train_root', None),
+    val_root=settings['data'].get('val_root', None),
+    test_root=settings['data'].get('test_root', None),
     train_properties=settings['data'].get('train_properties', ['energy', 'forces']),
     pre_transform=transform,
     train_size=settings['data'].get('train_size', -1),
@@ -64,6 +66,20 @@ train_gen, val_gen, test_gen, scalers = parse_train_test(
     )
 
 # model
+scalers = {}
+for key in settings['data'].get('train_properties', ['energy', 'forces']):
+    scalers[key] = get_scaler_by_string(key, stats)
+distance_network = nn.Sequential(
+    get_cutoff_by_string(
+        settings['model'].get('cutoff_network', 'poly'), 
+        cutoff=transform.r
+        ),
+    get_representation_by_string(
+        settings['model'].get('representation', 'bessel'), 
+        n_basis=settings['model'].get('n_basis', 20),
+        cutoff=transform.r,
+        ),
+    )
 if settings['model'].get('pretrained_model', None) is not None:
     model = torch.load(
         settings['model']['pretrained_model'], 
@@ -72,10 +88,9 @@ if settings['model'].get('pretrained_model', None) is not None:
 else:
     model = NewtonNet(
         n_features=settings['model'].get('n_features', 128),
-        embedded_atomic_numbers=embedded_atomic_numbers,
-        n_basis=settings['model'].get('n_basis', 20),
-        shell=shell,
-        cutoff_network=get_cutoff_by_string(settings['model'].get('cutoff_network', 'poly'), shell.cutoff),
+        embedded_atomic_numbers=stats['z'].max(),
+        scalers=scalers,
+        distance_network=distance_network,
         n_interactions=settings['model'].get('n_interactions', 3),
         share_interactions=settings['model'].get('share_layers', False),
         double_update_node=settings['model'].get('double_update_node', False),

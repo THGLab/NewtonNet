@@ -1,3 +1,6 @@
+import os.path as osp
+import json
+
 import numpy as np
 import torch
 from torch import nn
@@ -9,16 +12,15 @@ from newtonnet.layers.scalers import get_scaler_by_string
 
 
 def parse_train_test(
-        train_path: str = None,
-        val_path: str = None,
-        test_path: str = None,
+        train_root: str = None,
+        val_root: str = None,
+        test_root: str = None,
         train_size: int = None,
         val_size: int = None,
         test_size: int = None,
         train_batch_size: int = 32,
         val_batch_size: int = 32,
         test_batch_size: int = 32,
-        train_properties: list = ['energy', 'forces'],
         transform: callable = None,
         pre_transform: callable = None,
         pre_filter: callable = None,
@@ -51,23 +53,23 @@ def parse_train_test(
 
     # load data
     print('Data:')
-    if train_path is not None:
-        train_data = MolecularDataset(root=train_path, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
-        print(f'load {len(train_data)} data from {train_path}')
+    if train_root is not None:
+        train_data = MolecularDataset(root=train_root, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
+        print(f'load {len(train_data)} data from {train_root}')
     else:
-        raise ValueError('train_path must be provided')
+        raise ValueError('train_root must be provided')
     train_size = len(train_data) if train_size is None else train_size
     train_data, left_data = random_split(train_data, [train_size, len(train_data) - train_size])
-    if val_path is not None:
-        val_data = MolecularDataset(root=val_path, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
-        print(f'load {len(val_data)} data from {val_path}')
+    if val_root is not None:
+        val_data = MolecularDataset(root=val_root, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
+        print(f'load {len(val_data)} data from {val_root}')
     else:
         val_data = left_data
     val_size = len(val_data) if val_size is None else val_size
     val_data, left_data = random_split(val_data, [val_size, len(val_data) - val_size])
-    if test_path is not None:
-        test_data = MolecularDataset(root=test_path, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
-        print(f'load {len(test_data)} data from {test_path}')
+    if test_root is not None:
+        test_data = MolecularDataset(root=test_root, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
+        print(f'load {len(test_data)} data from {test_root}')
     else:
         test_data = left_data
     test_size = len(test_data) if test_size is None else test_size
@@ -81,16 +83,11 @@ def parse_train_test(
     print(f'batch size (train, val, test): {train_batch_size}, {val_batch_size}, {test_batch_size}')
 
     # extract data stats
-    embedded_atomic_numbers = torch.unique(train_data[:].z)
-    embedded_atomic_numbers = embedded_atomic_numbers[embedded_atomic_numbers > 0]
-    print(f'embedded atomic numbers: {embedded_atomic_numbers.tolist()}')
-    print('normalizers:')
-    normalizers = {}
-    for property in train_properties:
-        scalers = {}
-        normalizers[property] = get_scaler_by_string(property, train_data)
-        print(f'  {property}: {normalizers[property]}')
-    normalizers = nn.ModuleDict(normalizers)
-    print()
+    stats_path = osp.join(train_root, 'processed', 'stats.json')
+    with open(stats_path, 'r') as f:
+        stats = json.load(f)
+    print(f'stats: {stats}')
+    for key in stats:
+        stats[key] = torch.tensor(stats[key])
 
-    return train_gen, val_gen, test_gen#, embedded_atomic_numbers, normalizers
+    return train_gen, val_gen, test_gen, stats
