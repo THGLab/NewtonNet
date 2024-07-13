@@ -72,12 +72,12 @@ class MolecularDataset(InMemoryDataset):
 
         formula = torch.stack(formula_list, dim=0).float()
         energy = torch.cat(energy_list, dim=0)
-        shifts = torch.linalg.lstsq(formula, energy).solution
-        scale = ((energy - torch.matmul(formula, shifts)).square().sum() / (formula).sum()).sqrt()
-        
+        energy_shifts = torch.linalg.lstsq(formula, energy).solution
+        energy_scale = ((energy - torch.matmul(formula, energy_shifts)).square().sum() / (formula).sum()).sqrt()
+
         with open(stats_path, 'w') as f:
-            z, shift = dense_to_sparse(shifts.unsqueeze(-1))
-            json.dump({'z': z[0].tolist(), 'shift': shift.tolist(), 'scale': scale.item()}, f)
+            z, energy_shift = dense_to_sparse(energy_shifts.unsqueeze(-1))
+            json.dump({'z': z[0].tolist(), 'energy_shift': energy_shift.tolist(), 'energy_scale': energy_scale.item()}, f)
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}({len(self)})'

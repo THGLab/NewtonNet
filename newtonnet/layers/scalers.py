@@ -5,12 +5,9 @@ from torch_geometric.nn import SumAggregation, MeanAggregation, StdAggregation
 from torch_geometric.utils import one_hot
 
 
-def get_scaler_by_string(key, dataset):
-    loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
-    for data in loader:
-        break
+def get_scaler_by_string(key, stats):
     if key == 'energy':
-        scaler = GraphPropertyScaleShift(data.energy, data.z, data.batch)
+        scaler = ScaleShift(stats['z'], stats['energy_shift'], stats['energy_scale'])
     elif key == 'forces':
         scaler = NullScaleShift()
     else:
@@ -18,26 +15,26 @@ def get_scaler_by_string(key, dataset):
     return scaler
 
 
-class GraphPropertyScaleShift(nn.Module):
+class ScaleShift(nn.Module):
     '''
-    Scale and shift layer for graph properties.
+    Node-level scale and shift layer.
     
     Parameters:
-        data (torch.Tensor): The training data to be used for standardization.
         z (torch.Tensor): The atomic numbers of the atoms in the molecule.
-        batch (torch.Tensor): The batch indices.
-        freeze (bool): Whether to freeze the scale parameter.
+        shift (torch.Tensor): The shift values for the properties.
+        scale (torch.Tensor): The scale values for the properties.
     '''
-    def __init__(self, data, z, batch):
+    def __init__(self, z, shift, scale):
         super(GraphPropertyScaleShift, self).__init__()
-        sum_aggr = SumAggregation()
-        formula = sum_aggr(one_hot(z.long()), batch)    # z count for each graph
-        shift = torch.linalg.lstsq(formula, data).solution
-        scale = ((data - torch.matmul(formula, shift)).square().sum() / len(z)).sqrt()
-        scale = torch.ones_like(shift) * scale
-        
-        self.shift = nn.Embedding.from_pretrained(shift.reshape(-1, 1))
-        self.scale = nn.Parameter(scale.reshape(-1, 1))
+        shift_dense = torch.zeros(z.max().item() + 1)
+        shift_dense[z] = shift
+        self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1))
+        if len(scale) == 1:
+            self.scale = nn.Parameter(scale)
+        else:
+            scale_dense = torch.zeros(z.max().item() + 1)
+            scale_dense[z] = scale
+            self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1))
 
     def forward(self, inputs, z):
         '''
@@ -55,43 +52,6 @@ class GraphPropertyScaleShift(nn.Module):
 
     def __repr__(self):
         return f'{self.__class__.__name__}(shift={self.shift.weight.flatten().tolist()}, scale={self.scale.data.flatten().mean().item()})'
-    
-
-class NodePropertyScaleShift(nn.Module):
-    '''
-    Scale and shift layer for node properties.
-    
-    Parameters:
-        data (torch.Tensor): The training data to be used for standardization.
-        z (torch.Tensor): The atomic numbers of the atoms in the molecule.
-        freeze (bool): Whether to freeze the scale parameter.
-    '''
-    def __init__(self, data, z, freeze=False):
-        super(NodePropertyNormalizer, self).__init__(mean, std)
-        mean_aggr = MeanAggregation()
-        shift = mean_aggr(data, z)
-        std_aggr = StdAggregation()
-        scale = std_aggr(data, z) 
-
-        self.shift = nn.Embedding.from_pretrained(shift, freeze=freeze)
-        self.scale = nn.Embedding.from_pretrained(scale, freeze=freeze)
-
-    def forward(self, inputs, z):
-        '''
-        Scale and shift inputs.
-
-        Args:
-            inputs (torch.Tensor): The input values.
-            z (torch.Tensor): The atomic numbers of the atoms in the molecule.
-
-        Returns:
-            torch.Tensor: The normalized inputs.
-        '''
-        outputs = inputs * self.scale(z) + self.shift(z)
-        return outputs
-
-    def __repr__(self):
-        return f'{self.__class__.__name__}(shift={self.shift.weight.flatten().tolist()}, scale={self.scale.weight.flatten().tolist()})'
     
 
 class NullScaleShift(nn.Module):
