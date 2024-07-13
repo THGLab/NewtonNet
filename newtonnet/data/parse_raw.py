@@ -93,4 +93,4 @@ def parse_train_test(
     normalizers = nn.ModuleDict(normalizers)
     print()
 
-    return train_gen, val_gen, test_gen, normalizers
+    return train_gen, val_gen, test_gen#, embedded_atomic_numbers, normalizers
