@@ -114,7 +114,7 @@ class RadiusGraph(BaseTransform):
             max_num_neighbors=self.max_num_neighbors,
             flow=self.flow,
             num_workers=self.num_workers,
-        ).sort(dim=0)[0].unique(dim=1)
+        )#.sort(dim=0)[0].unique(dim=1)
         data.edge_attr = None
 
         return data
