@@ -59,22 +59,17 @@ class NewtonNet(nn.Module):
             ])
 
         # final output layer
-        output_kwargs = {
-            'n_features': n_features,
-            'activation': activation,
-            'dropout': dropout,
-            'train_normalizer': train_normalizer,
-            }
         self.output_layers = nn.ModuleDict({})
         for key in infer_properties:
-            normalizer = normalizers[key] if key in normalizers else None
-            output_layer = get_output_by_string(key, normalizer, **output_kwargs)
+            scaler = scalers[key] if key in scalers else None
+            output_layer = get_output_by_string(key, scaler, n_features, activation)
             self.output_layers.update({key: output_layer})
             if isinstance(output_layer, FirstDerivativeProperty):
                 self.embedding_layer.requires_dr = True
             if isinstance(output_layer, SecondDerivativeProperty):
-                assert output_layer.dependent_property in self.output_layers.keys(), f'cannot find dependent property {output_layer.dependent_property}'
-                self.output_layers[output_layer.dependent_property].requires_dr = True
+                dependent_property = output_layer.dependent_property
+                assert dependent_property in self.output_layers.keys(), f'cannot find dependent property {dependent_property}'
+                self.output_layers[dependent_property].requires_dr = True
         
         # device
         self.to(device)
@@ -110,9 +105,7 @@ class NewtonNet(nn.Module):
             'atom_mask': atom_mask,
             }
         for key, output_layer in self.output_layers.items():
-            output, output_normalized = output_layer(**outputs)
-            outputs[key] = output
-            outputs[key + '_normalized'] = output_normalized
+            output = output_layer(**outputs)
 
         return outputs
         
@@ -139,6 +132,9 @@ class EmbeddingNet(nn.Module):
         self.cutoff = distance_network['cutoff']
         self.edge_embedding = distance_network['representation']
         self.n_basis = self.edge_embedding.n_basis
+
+        # requires dr
+        self.requires_dr = False
 
     def forward(self, z, pos, edge_index):
 

@@ -10,8 +10,11 @@ def get_scaler_by_string(key, stats):
         scaler = ScaleShift(stats['z'], stats['energy_shift'], stats['energy_scale'])
     elif key == 'forces':
         scaler = NullScaleShift()
+    elif key == 'hessian':
+        scaler = NullScaleShift()
     else:
-        raise ValueError(f'scaler {key} is not supported')
+        print(f'scaler {key} is not supported, use NullScaleShift.')
+        scaler = NullScaleShift()
     return scaler
 
 
@@ -29,13 +32,13 @@ class ScaleShift(nn.Module):
         self.z_max = z.max().item()
         shift_dense = torch.zeros(self.z_max + 1)
         shift_dense[z] = shift
-        self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1))
+        self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1), requires_grad=True)
         if len(scale) == 1:
-            self.scale = nn.Embedding.from_pretrained(torch.full((self.z_max + 1, 1), scale))
+            self.scale = nn.Embedding.from_pretrained(torch.full((self.z_max + 1, 1), scale), requires_grad=True)
         else:
             scale_dense = torch.zeros(self.z_max + 1)
             scale_dense[z] = scale
-            self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1))
+            self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1), requires_grad=True)
 
     def forward(self, inputs, z):
         '''
