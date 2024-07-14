@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch_geometric.utils import scatter
 
 from newtonnet.layers.shells import ShellProvider
 from newtonnet.layers.cutoff import get_cutoff_by_string
@@ -27,6 +28,7 @@ class NewtonNet(nn.Module):
             n_features: int = 128,
             distance_network: nn.Module = None,
             n_interactions: int = 3,
+            activation: nn.Module = nn.SiLU(),
             infer_properties: list = [],
             scalers: nn.ModuleDict = {},
             device: torch.device = torch.device('cpu'),
@@ -36,51 +38,25 @@ class NewtonNet(nn.Module):
 
         # embedding layer
         if distance_network is None:
-            distance_network = nn.Sequential(
-                get_cutoff_by_string(
-                    settings['model'].get('cutoff_network', 'poly'), 
-                    cutoff=5.0,
-                    ),
-                get_representation_by_string(
-                    settings['model'].get('representation', 'bessel'), 
-                    n_basis=20,
-                    cutoff=5.0,
-                    ),
-                )
-        z_max = max([scaler.z_max for scaler in scalers.values()])
+            distance_network = nn.ModuleDict({
+                'scalednorm': get_cutoff_by_string('scalednorm'),
+                'cutoff': get_cutoff_by_string('poly'), 
+                'representation': get_representation_by_string('bessel'),
+                })
         self.embedding_layer = EmbeddingNet(
             n_features=n_features,
-            z_max=z_max,
+            z_max=max([scaler.z_max for scaler in scalers.values()]),
             distance_network=distance_network,
             )
 
         # message passing
-        if share_interactions:
-            # use the same message instance (hence the same weights)
-            self.interaction_layers = nn.ModuleList([
-                InteractionNet(
-                    n_features=n_features,
-                    n_basis=n_basis,
-                    activation=activation,
-                    shell=shell,
-                    cutoff_network=cutoff_network,
-                    double_update_node=double_update_node,
-                    layer_norm=layer_norm,
-                    )
-                ] * n_interactions)
-        else:
-            # use one SchNetInteraction instance for each interaction
-            self.interaction_layers = nn.ModuleList([
-                InteractionNet(
-                    n_features=n_features,
-                    n_basis=n_basis,
-                    activation=activation,
-                    shell=shell,
-                    cutoff_network=cutoff_network,
-                    double_update_node=double_update_node,
-                    layer_norm=layer_norm,
-                    ) for _ in range(n_interactions)
-                ])
+        self.interaction_layers = nn.ModuleList([
+            InteractionNet(
+                n_features=n_features,
+                n_basis=self.embedding_layer.n_basis,
+                activation=activation,
+                ) for _ in range(n_interactions)
+            ])
 
         # final output layer
         output_kwargs = {
@@ -103,27 +79,25 @@ class NewtonNet(nn.Module):
         # device
         self.to(device)
 
-    def forward(self, z, pos, batch):
+    def forward(self, z, pos, edge_index, batch):
         '''
         Network forward pass
 
         Parameters:
-            z (torch.Tensor): The atomic numbers of the atoms in the molecule. Shape: (n_atoms, ).
-            pos (torch.Tensor): The positions of the atoms in the molecule. Shape: (n_atoms, 3).
-            batch (torch.Tensor): The batch of the atoms in the molecule. Shape: (n_atoms, ).
+            z (torch.Tensor): The atomic numbers of the atoms in the molecule. Shape: (n_nodes, ).
+            pos (torch.Tensor): The positions of the atoms in the molecule. Shape: (n_nodes, 3).
+            edge_index (torch.Tensor): The edge index of the atoms in the molecule. Shape: (2, n_edges).
+            batch (torch.Tensor): The batch of the atoms in the molecule. Shape: (n_nodes, ).
 
         Returns:
             outputs (dict): The outputs of the network.
         '''
         # initialize node and edge representations
-        invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr, invariant_edge, distances, distance_vectors = \
-            self.embedding_layer(atomic_numbers, positions, neighbor_mask, distances, distance_vectors)
+        atom_node, force_node, disp_node, disp_edge, dist_edge = self.embedding_layer(z, pos, edge_index)
 
         # compute interaction block and update atomic embeddings
         for interaction_layer in self.interaction_layers:
-            # messages
-            invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr = \
-                interaction_layer(invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr, invariant_edge, neighbor_mask, distances, distance_vectors)
+            atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, disp_edge, dist_edge, edge_index)
 
         # output net
         outputs = {
@@ -164,8 +138,9 @@ class EmbeddingNet(nn.Module):
         self.norm = distance_network['scalednorm']
         self.cutoff = distance_network['cutoff']
         self.edge_embedding = distance_network['representation']
+        self.n_basis = self.edge_embedding.n_basis
 
-    def forward(self, z, pos, edge_index, batch):
+    def forward(self, z, pos, edge_index):
 
         # initialize node representations
         atom_node = self.node_embedding(z)  # n_nodes, n_features
@@ -175,13 +150,13 @@ class EmbeddingNet(nn.Module):
         # recompute distances and distance vectors
         if self.requires_dr:
             pos.requires_grad_()
-            disp = pos[edge_index[0]] - pos[edge_index[1]]  # n_edges, 3
+            disp_edge = pos[edge_index[0]] - pos[edge_index[1]]  # n_edges, 3
 
         # initialize edge representations
-        dist = self.norm(disp)  # n_edges, 1
+        dist = self.norm(disp_edge)  # n_edges, 1
         dist_edge = self.cutoff(dist) * self.edge_embedding(dist)  # n_edges, n_basis
 
-        return atom_node, force_node, disp_node, dist_edge
+        return atom_node, force_node, disp_node, disp_edge, dist_edge
 
 
 class InteractionNet(nn.Module):
@@ -192,106 +167,76 @@ class InteractionNet(nn.Module):
         n_features (int): Number of features in the hidden layer.
         n_basis (int): Number of radial basis functions.
         activation (nn.Module): Activation function.
-        shell (nn.Module): The shell module to handle neighbors.
-        cutoff_network (nn.Module): The cutoff layer.
-        double_update_node (bool): Whether to update the invariant node twice in each message passing layer.
-        layer_norm (bool): Whether to use layer normalization after message passing.
     '''
-    def __init__(self, n_features, n_basis, activation, shell, cutoff_network, double_update_node, layer_norm):
+    def __init__(self, n_features, n_basis, activation):
         super(InteractionNet, self).__init__()
 
         self.n_features = n_features
 
         # invariant message passing
-        self.invariant_message_edge = nn.Linear(n_basis, n_features)
-        nn.init.xavier_uniform_(self.invariant_message_edge.weight)
-        nn.init.zeros_(self.invariant_message_edge.bias)
-        self.invariant_message_node = nn.Sequential(
+        self.inv_message_nodepart = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
             nn.Linear(n_features, n_features),
         )
-
-        # cutoff layer used in interaction block
-        self.shell = shell
-        self.cutoff_network = cutoff_network
+        self.inv_message_edgepart = nn.Linear(n_basis, n_features)
+        nn.init.xavier_uniform_(self.inv_message_dist.weight)
+        nn.init.zeros_(self.inv_message_dist.bias)
 
         # equivariant message passing
-        self.equivariant_message_coefficient = nn.Linear(n_features, 1, bias=False)
-        nn.init.xavier_uniform_(self.equivariant_message_coefficient.weight)
-        self.equivariant_message_feature = nn.Sequential(
+        self.equiv_message1 = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
             nn.Linear(n_features, n_features),
         )
-        self.equivariant_selfupdate_coefficient = nn.Sequential(
+        self.equiv_message2 = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
             nn.Linear(n_features, n_features),
         )
-        self.equivariant_message_edge = nn.Sequential(
+        self.equiv_message3 = nn.Sequential(
             nn.Linear(n_features, n_features, bias=False),
             activation,
             nn.Linear(n_features, n_features, bias=False),
         )
 
-        self.invariant_selfupdate_coefficient = nn.Sequential(
+        self.inv_update = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
             nn.Linear(n_features, n_features),
         )
 
-        self.double_update_node = double_update_node
-
-        self.layer_norm = layer_norm
-        if self.layer_norm:
-            self.norm = nn.LayerNorm(n_features)
+        self.norm = nn.LayerNorm(n_features)
     
-    def forward(self, invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr, invariant_edge, neighbor_mask, distances, distance_vectors):
-        # map decomposed distances
-        invariant_message_edge = self.invariant_message_edge(invariant_edge)    # batch_size, n_atoms, n_neighbors, n_features
-
-        # cutoff
-        invariant_message_edge = invariant_message_edge * self.cutoff_network(distances).unsqueeze(-1)    # batch_size, n_atoms, n_neighbors, n_features
-
-        # map atomic features
-        invariant_message_node = self.invariant_message_node(invariant_node)    # batch_size, n_atoms, n_features
-
-        # # symmetric feature multiplication
-        invariant_message_node_i, invariant_message_node_f = self.shell.gather_neighbors(invariant_message_node, neighbor_mask)    # batch_size, n_atoms, n_neighbors, n_features
-        invariant_message = invariant_message_edge * invariant_message_node_i * invariant_message_node_f    # batch_size, n_atoms, n_neighbors, n_features
-
-        # update a with invariance
-        if self.double_update_node:
-            invariant_update = (invariant_message * neighbor_mask.unsqueeze(-1)).sum(dim=2)    # batch_size, n_atoms, n_features
-            invariant_node = invariant_node + invariant_update    # batch_size, n_atoms, n_features
-
-        # F
-        equivariant_message_F = self.equivariant_message_coefficient(invariant_message) * distance_vectors  # batch_size, n_atoms, n_neighbors, 3
-        equivariant_update_F = (equivariant_message_F * neighbor_mask.unsqueeze(-1)).sum(dim=2)  # batch_size, n_atoms, 3
-        equivariant_node_F = equivariant_node_F + equivariant_update_F
+    def forward(self, atom_node, force_node, disp_node, disp_edge, dist_edge, edge_index):
+        # a
+        inv_message_nodepart = self.inv_message_nodepart(atom_node)    # n_nodes, n_features
+        inv_message_edgepart = self.inv_message_edgepart(dist_edge)    # n_edges, n_features
+        inv_message = inv_message_edgepart * inv_message_nodepart[edge_index[0]] * inv_message_nodepart[edge_index[1]]    # n_edges, n_features
+        atom_node = atom_node + scatter(inv_message, edge_index[0], dim=0)    # n_nodes, n_features
 
         # f
-        equivariant_message_f = self.equivariant_message_feature(invariant_message).unsqueeze(-2) * equivariant_message_F.unsqueeze(-1)  # batch_size, n_atoms, n_neighbors, 3, n_features
-        equivariant_update_f = (equivariant_message_f * neighbor_mask.unsqueeze(-1).unsqueeze(-2)).sum(dim=2)  # batch_size, n_atoms, 3, n_features
-        equivariant_node_f = equivariant_node_f + equivariant_update_f
+        equiv_message1_invedgepart = self.equiv_message1(inv_message).unsqueeze(1)    # n_edges, 1, n_features
+        equiv_message1_equivedgepart = disp_edge.unsqueeze(2)    # n_edges, 3, 1
+        equiv_message1 = equiv_message1_invedgepart * equiv_message1_equivedgepart    # n_edges, 3, n_features
+        force_node = force_node + scatter(equiv_message1, edge_index[0], dim=0)    # n_nodes, 3, n_features
         
         # dr
-        equivariant_message_dr_edge = self.equivariant_message_edge(invariant_message).unsqueeze(-2)    # batch_size, n_atoms, n_neighbors, 3, n_features
-        equivariant_message_dr_node_i, equivariant_message_dr_node_f = self.shell.gather_neighbors(equivariant_node_dr, neighbor_mask)    # batch_size, n_atoms, 3, n_features
-        equivariant_message_dr = equivariant_message_dr_edge * equivariant_message_dr_node_f    # batch_size, n_atoms, n_neighbors, 3, n_features
-        equivariant_update_dr = (equivariant_message_dr * neighbor_mask.unsqueeze(-1).unsqueeze(-2)).sum(dim=2)  # batch_size, n_atoms, 3, n_features
-        equivariant_node_dr = equivariant_node_dr + equivariant_update_dr    # batch_size, n_atoms, 3, n_features
+        equiv_message2_nodepart = disp_node.unsqueeze(2)    # n_nodes, 3, 1
+        equiv_message2_edgepart = self.equiv_message2(inv_message).unsqueeze(1)    # n_edges, 1, n_features
+        equiv_message2 = equiv_message2_edgepart * equiv_message2_nodepart[edge_index[1]]    # n_edges, 3, n_features
+        disp_node = disp_node + scatter(equiv_message2, edge_index[0], dim=0)    # n_nodes, 3, n_features
 
-        equivariant_update_dr = self.equivariant_selfupdate_coefficient(invariant_node).unsqueeze(-2) * equivariant_update_f    # batch_size, n_atoms, 3, n_features
-        equivariant_node_dr = equivariant_node_dr + equivariant_update_dr    # batch_size, n_atoms, 3, n_features
+        equiv_message3_invnodepart = self.equiv_message3(atom_node).unsqueeze(1)    # n_nodes, 1, n_features
+        equiv_message3_equivnodepart = scatter(equiv_message1, edge_index[0], dim=0)    # n_nodes, 3, n_features
+        equiv_message3 = equiv_message3_invnodepart[edge_index[1]] * equiv_message3_equivnodepart[edge_index[1]]    # n_edges, 3, n_features
+        disp_node = disp_node + scatter(equiv_message3, edge_index[0], dim=0)    # n_nodes, 3, n_features
 
         # update energy
-        invariant_update = -self.invariant_selfupdate_coefficient(invariant_node) * torch.sum(equivariant_node_f * equivariant_node_dr, dim=-2)  # batch_size, n_atoms, n_features
-        invariant_node = invariant_node + invariant_update
+        inv_update = self.inv_update(atom_node) * torch.sum(- force_node * disp_node, dim=-2)  # n_nodes, n_features
+        atom_node = atom_node + inv_update
 
         # layer norm
-        if self.layer_norm:
-            invariant_node = self.norm(invariant_node)
+        atom_node = self.norm(atom_node)
 
-        return invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr
+        return atom_node, force_node, disp_node
