@@ -15,6 +15,7 @@ from newtonnet.data import parse_train_test
 from newtonnet.layers.precision import set_precison_by_string
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
+from newtonnet.layers.representation import get_representation_by_string
 from newtonnet.train.loss import get_loss_by_string
 from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
 # torch.autograd.set_detect_anomaly(True)
@@ -57,6 +58,7 @@ train_gen, val_gen, test_gen, stats = parse_train_test(
     test_root=settings['data'].get('test_root', None),
     train_properties=settings['data'].get('train_properties', ['energy', 'forces']),
     pre_transform=transform,
+    transform=None,
     train_size=settings['data'].get('train_size', -1),
     val_size=settings['data'].get('val_size', -1),
     test_size=settings['data'].get('test_size', -1),
@@ -69,17 +71,19 @@ train_gen, val_gen, test_gen, stats = parse_train_test(
 scalers = {}
 for key in settings['data'].get('train_properties', ['energy', 'forces']):
     scalers[key] = get_scaler_by_string(key, stats)
-distance_network = nn.Sequential(
-    get_cutoff_by_string(
-        settings['model'].get('cutoff_network', 'poly'), 
-        cutoff=transform.r
-        ),
-    get_representation_by_string(
-        settings['model'].get('representation', 'bessel'), 
-        n_basis=settings['model'].get('n_basis', 20),
+distance_network = nn.ModuleDict({
+    'scalednorm': get_cutoff_by_string(
+        'scalednorm',
         cutoff=transform.r,
         ),
-    )
+    'cutoff': get_cutoff_by_string(
+        settings['model'].get('cutoff_network', 'poly'), 
+        ),
+    'representation': get_representation_by_string(
+        settings['model'].get('representation', 'bessel'), 
+        n_basis=settings['model'].get('n_basis', 20),
+        ),
+    })
 if settings['model'].get('pretrained_model', None) is not None:
     model = torch.load(
         settings['model']['pretrained_model'], 
@@ -88,18 +92,10 @@ if settings['model'].get('pretrained_model', None) is not None:
 else:
     model = NewtonNet(
         n_features=settings['model'].get('n_features', 128),
-        embedded_atomic_numbers=stats['z'].max(),
-        scalers=scalers,
         distance_network=distance_network,
         n_interactions=settings['model'].get('n_interactions', 3),
-        share_interactions=settings['model'].get('share_layers', False),
-        double_update_node=settings['model'].get('double_update_node', False),
-        layer_norm=settings['model'].get('layer_norm', False),
-        activation=get_activation_by_string(settings['model'].get('activation', 'swish')),
         infer_properties=settings['model'].get('infer_properties', ['energy', 'forces']),
-        normalizers=normalizers,
-        train_normalizer=settings['model'].get('train_normalizer', False),
-        dropout=settings['training'].get('dropout', 0.0),
+        scalers=scalers,
         device=device[0],
         )
 

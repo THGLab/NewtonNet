@@ -2,8 +2,8 @@ import torch
 from torch import nn
 
 from newtonnet.layers.shells import ShellProvider
-from newtonnet.layers.cutoff import PolynomialCutoff
-from newtonnet.layers.representations import RadialBesselLayer
+from newtonnet.layers.cutoff import get_cutoff_by_string
+from newtonnet.layers.representations import get_representation_by_string
 from newtonnet.models.output import get_output_by_string, FirstDerivativeProperty, SecondDerivativeProperty
 
 
@@ -13,54 +13,45 @@ class NewtonNet(nn.Module):
 
     Parameters:
         n_features (int): Number of features in the latent layer. Default: 128.
-        embedded_atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
         n_basis (int): Number of radial basis functions for edge description. Default: 20.
-        shell (nn.Module): The shell module. Default: ShellProvider().
-        cutoff_network (nn.Module): The cutoff function. Default: PolynomialCutoff(shell.cutoff).
+        distance_network (nn.Module): The distance transformation function.
         n_interactions (int): Number of message passing layers. Default: 3.
-        share_interactions (bool): Whether to share the weights of the message passing layers. Default: False.
-        double_update_node (bool): Whether to update the invariant node twice in each message passing layer. Default: False.
-        layer_norm (bool): Whether to use layer normalization after message passing. Default: False.
         activation (nn.Module): Activation function. Default: nn.SiLU().
-        predictions (list): The properties to predict. Default: [].
-        dropout (float): Dropout between 0 and 1. Default: 0.0.
-        normalizers (nn.ModuleDict): The normalizers for the atomic properties. Default: {}.
-        train_normalizer (bool): Whether the normalizers are trainable. Default: False.
+        infer_properties (list): The properties to predict. Default: [].
+        scalers (nn.ModuleDict): The scalers for the atomic properties. Default: {}.
+        train_scalers (bool): Whether the normalizers are trainable. Default: False.
         device (torch.device): The device to run the network. Default: torch.device('cpu').
     '''
     def __init__(
             self,
             n_features: int = 128,
-            embedded_atomic_numbers: torch.Tensor = torch.tensor([0]),
-            n_basis: int = 20,
-            shell: nn.Module = None,
-            cutoff_network: nn.Module = None,
+            distance_network: nn.Module = None,
             n_interactions: int = 3,
-            share_interactions: bool = False,
-            double_update_node: bool = False,
-            layer_norm: bool = False,
-            activation: nn.Module = nn.SiLU(),
             infer_properties: list = [],
-            dropout: float = 0.0,
-            normalizers: nn.ModuleDict = {},
-            train_normalizer: bool = False,
+            scalers: nn.ModuleDict = {},
             device: torch.device = torch.device('cpu'),
     ) -> None:
 
         super(NewtonNet, self).__init__()
 
         # embedding layer
-        if shell is None:
-            print('use default shell')
-            shell = ShellProvider()
-        if cutoff_network is None:
-            print('use default cutoff network')
-            cutoff_network = PolynomialCutoff(shell.cutoff)
+        if distance_network is None:
+            distance_network = nn.Sequential(
+                get_cutoff_by_string(
+                    settings['model'].get('cutoff_network', 'poly'), 
+                    cutoff=5.0,
+                    ),
+                get_representation_by_string(
+                    settings['model'].get('representation', 'bessel'), 
+                    n_basis=20,
+                    cutoff=5.0,
+                    ),
+                )
+        z_max = max([scaler.z_max for scaler in scalers.values()])
         self.embedding_layer = EmbeddingNet(
             n_features=n_features,
-            embedded_atomic_numbers=embedded_atomic_numbers,
-            n_basis=n_basis,
-            shell=shell,
+            z_max=z_max,
+            distance_network=distance_network,
             )
 
         # message passing
@@ -112,17 +103,14 @@ class NewtonNet(nn.Module):
         # device
         self.to(device)
 
-    def forward(self, atomic_numbers, positions, atom_mask, neighbor_mask, distances, distance_vectors):
+    def forward(self, z, pos, batch):
         '''
         Network forward pass
 
         Parameters:
-            atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule. Shape: (batch_size, n_atoms).
-            positions (torch.Tensor): The positions of the atoms in the molecule. Shape: (batch_size, n_atoms, 3).
-            atom_mask (torch.Tensor): The mask of the atoms in the molecule. Shape: (batch_size, n_atoms).
-            neighbor_mask (torch.Tensor): The mask of the neighbors of the atoms in the molecule. Shape: (batch_size, n_atoms, n_atoms).
-            distances (torch.Tensor): The distances between the atoms in the molecule. Shape: (batch_size, n_atoms, n_atoms).
-            distance_vectors (torch.Tensor): The distance vectors between the atoms in the molecule. Shape: (batch_size, n_atoms, n_atoms, 3).
+            z (torch.Tensor): The atomic numbers of the atoms in the molecule. Shape: (n_atoms, ).
+            pos (torch.Tensor): The positions of the atoms in the molecule. Shape: (n_atoms, 3).
+            batch (torch.Tensor): The batch of the atoms in the molecule. Shape: (n_atoms, ).
 
         Returns:
             outputs (dict): The outputs of the network.
@@ -161,48 +149,39 @@ class EmbeddingNet(nn.Module):
 
     Parameters:
         n_features (int): Number of features in the hidden layer.
-        embedded_atomic_numbers (torch.Tensor): The atomic numbers of the atoms in the molecule.
-        n_basis (int): Number of radial basis functions.
-        shell (nn.Module): The shell module.
+        z_max (int): Maximum atomic number.
+        distance_network (nn.Module): The distance transformation function.
     '''
-    def __init__(self, n_features, embedded_atomic_numbers, n_basis, shell):
+    def __init__(self, n_features, z_max, distance_network):
 
         super(EmbeddingNet, self).__init__()
 
         # atomic embedding
         self.n_features = n_features
-        self.node_embedding = nn.Embedding(embedded_atomic_numbers.max() + 1, n_features)
-        for z in range(embedded_atomic_numbers.max() + 1):
-            if z not in embedded_atomic_numbers:
-                self.node_embedding.weight.data[z] = torch.nan
-        self.requires_dr = False
+        self.node_embedding = nn.Embedding(z_max + 1, n_features)
 
         # edge embedding
-        self.shell = shell
-        self.edge_embedding = RadialBesselLayer(n_basis, shell.cutoff)
-        self.epsilon = 1.0e-8
+        self.norm = distance_network['scalednorm']
+        self.cutoff = distance_network['cutoff']
+        self.edge_embedding = distance_network['representation']
 
-    def forward(self, atomic_numbers, positions, neighbor_mask, distances, distance_vectors):
+    def forward(self, z, pos, edge_index, batch):
 
         # initialize node representations
-        invariant_node = self.node_embedding(atomic_numbers)  # batch_size, n_atoms, n_features
-        batch_size, n_atoms, n_features = invariant_node.shape
-        equivariant_node_F = torch.zeros((batch_size, n_atoms, 3), device=positions.device)  # batch_size, n_atoms, 3
-        equivariant_node_f = torch.zeros((batch_size, n_atoms, 3, n_features), device=positions.device)  # batch_size, n_atoms, 3, n_features
-        equivariant_node_dr = torch.zeros((batch_size, n_atoms, 3, n_features), device=positions.device)  # batch_size, n_atoms, 3, n_features
+        atom_node = self.node_embedding(z)  # n_nodes, n_features
+        force_node = torch.zeros(*pos.shape, n_features)  # n_nodes, 3, n_features
+        disp_node = torch.zeros(*pos.shape, n_features)  # n_nodes, 3, n_features
 
         # recompute distances and distance vectors
         if self.requires_dr:
-            positions.requires_grad_()
-            distances, distance_vectors, neighbor_mask = self.shell(positions, neighbor_mask)
-        distance_vectors = distance_vectors / (distances.unsqueeze(-1) + self.epsilon)
+            pos.requires_grad_()
+            disp = pos[edge_index[0]] - pos[edge_index[1]]  # n_edges, 3
 
         # initialize edge representations
-        # self.edge_embedding.requires_grad_(False)
-        invariant_edge = self.edge_embedding(distances)
+        dist = self.norm(disp)  # n_edges, 1
+        dist_edge = self.cutoff(dist) * self.edge_embedding(dist)  # n_edges, n_basis
 
-
-        return invariant_node, equivariant_node_F, equivariant_node_f, equivariant_node_dr, invariant_edge, distances, distance_vectors
+        return atom_node, force_node, disp_node, dist_edge
 
 
 class InteractionNet(nn.Module):
