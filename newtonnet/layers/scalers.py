@@ -26,13 +26,14 @@ class ScaleShift(nn.Module):
     '''
     def __init__(self, z, shift, scale):
         super(GraphPropertyScaleShift, self).__init__()
-        shift_dense = torch.zeros(z.max().item() + 1)
+        self.z_max = z.max().item()
+        shift_dense = torch.zeros(self.z_max + 1)
         shift_dense[z] = shift
         self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1))
         if len(scale) == 1:
-            self.scale = nn.Parameter(scale)
+            self.scale = nn.Embedding.from_pretrained(torch.full((self.z_max + 1, 1), scale))
         else:
-            scale_dense = torch.zeros(z.max().item() + 1)
+            scale_dense = torch.zeros(self.z_max + 1)
             scale_dense[z] = scale
             self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1))
 
@@ -47,7 +48,7 @@ class ScaleShift(nn.Module):
         Returns:
             torch.Tensor: The normalized inputs.
         '''
-        outputs = input * self.scale + self.shift(z)
+        outputs = input * self.scale(z) + self.shift(z)
         return outputs
 
     def __repr__(self):

@@ -8,7 +8,7 @@ from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
 
 from newtonnet.data import MolecularDataset
-from newtonnet.layers.scalers import get_scaler_by_string
+from newtonnet.data import RadiusGraph
 
 
 def parse_train_test(
@@ -22,7 +22,7 @@ def parse_train_test(
         val_batch_size: int = 32,
         test_batch_size: int = 32,
         transform: callable = None,
-        pre_transform: callable = None,
+        pre_transform: callable = RadiusGraph(),
         pre_filter: callable = None,
         force_reload: bool = False,
         ):
