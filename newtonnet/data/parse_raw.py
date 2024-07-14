@@ -23,7 +23,7 @@ def parse_train_test(
         val_batch_size: int = 32,
         test_batch_size: int = 32,
         transform: callable = None,
-        pre_transform: callable = RadiusGraph(r=5.0, max_num_neighbors=None),
+        pre_transform: callable = RadiusGraph(r=5.0, max_num_neighbors=1024),
         pre_filter: callable = None,
         force_reload: bool = False,
         ):
