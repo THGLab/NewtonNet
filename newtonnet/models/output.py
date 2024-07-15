@@ -3,13 +3,12 @@ from torch import nn
 from torch.autograd import grad
 from torch_geometric.utils import scatter
 
-from newtonnet.layers.aggregation import get_aggregation_by_string
-from newtonnet.layers.scalers import get_scaler_by_string
+from newtonnet.layers.scalers import NullScaleShift
 
 
 def get_output_by_string(key, scaler=None, **kwargs):
     if scaler is None:
-        get_scaler_by_string(key, stats=None)
+        scaler = NullScaleShift()
     if key == 'energy':
         output_layer = InvariantGraphProperty(
             aggregration='sum',
@@ -19,7 +18,7 @@ def get_output_by_string(key, scaler=None, **kwargs):
     elif key == 'forces':
         output_layer = FirstDerivativeProperty(
             dependent_property='energy',
-            independent_property='positions',
+            independent_property='pos',
             negate=True,
             scaler=scaler,
             **kwargs,
@@ -114,8 +113,6 @@ class FirstDerivativeProperty(nn.Module):
             dependent_property: str,
             independent_property: str,
             negate: bool,
-            normalizer: nn.Module,
-            train_normalizer: bool = False, 
             **kwargs,
             ):
 
@@ -142,59 +139,59 @@ class FirstDerivativeProperty(nn.Module):
         else:
             return output
 
-# class SecondDerivativeProperty(nn.Module):
-#     '''
-#     Second derivative property prediction
+class SecondDerivativeProperty(nn.Module):
+    '''
+    Second derivative property prediction
 
-#     Parameters:
-#         dependent_property (str): The dependent property.
-#         independent_property (str): The independent property.
-#         negate (bool): Whether to negate the output.
-#         normalizer (nn.Module): The normalizer for the atomic properties.
-#         train_normalizer (bool): Whether the normalizers are trainable.
-#     '''
-#     def __init__(
-#             self, 
-#             dependent_property: str,
-#             independent_property: str,
-#             negate: bool,
-#             **kwargs,
-#             ):
+    Parameters:
+        dependent_property (str): The dependent property.
+        independent_property (str): The independent property.
+        negate (bool): Whether to negate the output.
+        normalizer (nn.Module): The normalizer for the atomic properties.
+        train_normalizer (bool): Whether the normalizers are trainable.
+    '''
+    def __init__(
+            self, 
+            dependent_property: str,
+            independent_property: str,
+            negate: bool,
+            **kwargs,
+            ):
 
-#         super(SecondDerivativeProperty, self).__init__()
-#         self.dependent_property = dependent_property
-#         self.independent_property = independent_property
-#         self.negate = negate
+        super(SecondDerivativeProperty, self).__init__()
+        self.dependent_property = dependent_property
+        self.independent_property = independent_property
+        self.negate = negate
 
-#     def forward(self, **inputs):
-#         dependent_property = inputs[self.dependent_property]
-#         independent_property = inputs[self.independent_property]
-#         n_data, n_atoms, n_dim = independent_property.shape
-#         grad_outputs = torch.eye(n_atoms * n_dim, device=independent_property.device)    # n_atoms * n_dim, n_atoms * n_dim
-#         grad_outputs = grad_outputs.view((n_atoms * n_dim, 1, n_atoms, n_dim)).repeat(1, n_data, 1, 1)    # n_atoms * n_dim, n_data, n_atoms, n_dim
-#         output = torch.vmap(
-#             lambda V: grad(
-#                 dependent_property, 
-#                 independent_property, 
-#                 grad_outputs=V, 
-#                 create_graph=False, 
-#                 retain_graph=True,
-#                 )[0]
-#             )(grad_outputs)
-#         output = output.view((n_atoms, n_dim, n_data, n_atoms, n_dim)).permute((2, 0, 1, 3, 4))    # n_data, n_atoms, grad_outputs, n_atoms, grad_outputs
-#         # output = torch.zeros(n_data, n_atoms, n_dim, n_atoms, n_dim, device=independent_property.device)
-#         # for atom in range(n_atoms):
-#         #     for dim in range(n_dim):
-#         #         output[:, atom, dim, :, :] = grad(
-#         #             dependent_property[:, atom, dim], 
-#         #             independent_property, 
-#         #             grad_outputs=torch.ones(n_data, device=independent_property.device), 
-#         #             create_graph=False, 
-#         #             retain_graph=True,
-#         #             )[0]
+    def forward(self, **inputs):
+        dependent_property = inputs[self.dependent_property]
+        independent_property = inputs[self.independent_property]
+        n_data, n_atoms, n_dim = independent_property.shape
+        grad_outputs = torch.eye(n_atoms * n_dim, device=independent_property.device)    # n_atoms * n_dim, n_atoms * n_dim
+        grad_outputs = grad_outputs.view((n_atoms * n_dim, 1, n_atoms, n_dim)).repeat(1, n_data, 1, 1)    # n_atoms * n_dim, n_data, n_atoms, n_dim
+        output = torch.vmap(
+            lambda V: grad(
+                dependent_property, 
+                independent_property, 
+                grad_outputs=V, 
+                create_graph=False, 
+                retain_graph=True,
+                )[0]
+            )(grad_outputs)
+        output = output.view((n_atoms, n_dim, n_data, n_atoms, n_dim)).permute((2, 0, 1, 3, 4))    # n_data, n_atoms, grad_outputs, n_atoms, grad_outputs
+        # output = torch.zeros(n_data, n_atoms, n_dim, n_atoms, n_dim, device=independent_property.device)
+        # for atom in range(n_atoms):
+        #     for dim in range(n_dim):
+        #         output[:, atom, dim, :, :] = grad(
+        #             dependent_property[:, atom, dim], 
+        #             independent_property, 
+        #             grad_outputs=torch.ones(n_data, device=independent_property.device), 
+        #             create_graph=False, 
+        #             retain_graph=True,
+        #             )[0]
 
-#         output_normalized = self.normalizer.forward(output, atomic_numbers)
-#         if self.negate:
-#             return -output, -output_normalized
-#         else:
-#             return output, output_normalized
+        output_normalized = self.normalizer.forward(output, atomic_numbers)
+        if self.negate:
+            return -output, -output_normalized
+        else:
+            return output, output_normalized
