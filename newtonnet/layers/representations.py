@@ -15,9 +15,7 @@ class RadialBesselLayer(nn.Module):
     Radial Bessel functions based on the work by DimeNet: https://github.com/klicperajo/dimenet
 
     Parameters:
-        n_radials (int): Total number of radial functions. Default: 16.
-        cutoff (float): Cutoff. Default: 5.0.
-        device (torch.device): Device. Default: torch.device('cpu').
+        n_basis (int): Total number of radial functions. Default: 16.
 
     Notes:
         y = sin(pi * r) / (pi * r)
@@ -25,7 +23,8 @@ class RadialBesselLayer(nn.Module):
 
     def __init__(self, n_basis=16):
         super(RadialBesselLayer, self).__init__()
-        self.frequencies = nn.Parameter(torch.arange(1, n_basis + 1, requires_grad=False) * torch.pi)
+        self.n_basis = n_basis
+        self.frequencies = nn.Parameter(torch.arange(1, self.n_basis + 1, requires_grad=False) * torch.pi)
         self.epsilon = 1.0e-8
 
     def forward(self, dist):

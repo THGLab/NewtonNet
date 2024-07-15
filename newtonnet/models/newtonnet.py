@@ -45,7 +45,7 @@ class NewtonNet(nn.Module):
                 })
         self.embedding_layer = EmbeddingNet(
             n_features=n_features,
-            z_max=max([scaler.z_max for scaler in scalers.values()]),
+            z_max=max([scaler.z_max for scaler in scalers.values()]) if scalers else 128,
             distance_network=distance_network,
             )
 
@@ -62,7 +62,7 @@ class NewtonNet(nn.Module):
         self.output_layers = nn.ModuleDict({})
         for key in infer_properties:
             scaler = scalers[key] if key in scalers else None
-            output_layer = get_output_by_string(key, scaler, n_features, activation)
+            output_layer = get_output_by_string(key, scaler=scaler, n_features=n_features, activation=activation)
             self.output_layers.update({key: output_layer})
             if isinstance(output_layer, FirstDerivativeProperty):
                 self.embedding_layer.requires_dr = True
@@ -96,16 +96,15 @@ class NewtonNet(nn.Module):
 
         # output net
         outputs = {
-            'invariant_node': invariant_node,
-            'equivariant_node_F': equivariant_node_F,
-            'equivariant_node_f': equivariant_node_f,
-            'equivariant_node_dr': equivariant_node_dr,
-            'atomic_numbers': atomic_numbers,
-            'positions': positions,
-            'atom_mask': atom_mask,
+            'z': z,
+            'pos': pos,
+            'batch': batch,
+            'atom_node': atom_node,
+            'force_node': force_node,
             }
         for key, output_layer in self.output_layers.items():
             output = output_layer(**outputs)
+            outputs.update({key: output})
 
         return outputs
         
@@ -140,8 +139,8 @@ class EmbeddingNet(nn.Module):
 
         # initialize node representations
         atom_node = self.node_embedding(z)  # n_nodes, n_features
-        force_node = torch.zeros(*pos.shape, n_features)  # n_nodes, 3, n_features
-        disp_node = torch.zeros(*pos.shape, n_features)  # n_nodes, 3, n_features
+        force_node = torch.zeros(*pos.shape, self.n_features)  # n_nodes, 3, n_features
+        disp_node = torch.zeros(*pos.shape, self.n_features)  # n_nodes, 3, n_features
 
         # recompute distances and distance vectors
         if self.requires_dr:
@@ -176,8 +175,8 @@ class InteractionNet(nn.Module):
             nn.Linear(n_features, n_features),
         )
         self.inv_message_edgepart = nn.Linear(n_basis, n_features)
-        nn.init.xavier_uniform_(self.inv_message_dist.weight)
-        nn.init.zeros_(self.inv_message_dist.bias)
+        nn.init.xavier_uniform_(self.inv_message_edgepart.weight)
+        nn.init.zeros_(self.inv_message_edgepart.bias)
 
         # equivariant message passing
         self.equiv_message1 = nn.Sequential(
@@ -218,7 +217,7 @@ class InteractionNet(nn.Module):
         force_node = force_node + scatter(equiv_message1, edge_index[0], dim=0)    # n_nodes, 3, n_features
         
         # dr
-        equiv_message2_nodepart = disp_node.unsqueeze(2)    # n_nodes, 3, 1
+        equiv_message2_nodepart = disp_node    # n_nodes, 3, n_features
         equiv_message2_edgepart = self.equiv_message2(inv_message).unsqueeze(1)    # n_edges, 1, n_features
         equiv_message2 = equiv_message2_edgepart * equiv_message2_nodepart[edge_index[1]]    # n_edges, 3, n_features
         disp_node = disp_node + scatter(equiv_message2, edge_index[0], dim=0)    # n_nodes, 3, n_features
