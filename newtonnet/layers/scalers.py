@@ -28,17 +28,17 @@ class ScaleShift(nn.Module):
         scale (torch.Tensor): The scale values for the properties.
     '''
     def __init__(self, z, shift, scale):
-        super(GraphPropertyScaleShift, self).__init__()
+        super(ScaleShift, self).__init__()
         self.z_max = z.max().item()
         shift_dense = torch.zeros(self.z_max + 1)
         shift_dense[z] = shift
-        self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1), requires_grad=True)
-        if len(scale) == 1:
-            self.scale = nn.Embedding.from_pretrained(torch.full((self.z_max + 1, 1), scale), requires_grad=True)
+        self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1))
+        if scale.ndim == 0:
+            self.scale = nn.Embedding.from_pretrained(torch.full((self.z_max + 1, 1), scale))
         else:
             scale_dense = torch.zeros(self.z_max + 1)
             scale_dense[z] = scale
-            self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1), requires_grad=True)
+            self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1))
 
     def forward(self, inputs, z):
         '''
@@ -51,11 +51,11 @@ class ScaleShift(nn.Module):
         Returns:
             torch.Tensor: The normalized inputs.
         '''
-        outputs = input * self.scale(z) + self.shift(z)
+        outputs = inputs * self.scale(z) + self.shift(z)
         return outputs
 
     def __repr__(self):
-        return f'{self.__class__.__name__}(shift={self.shift.weight.flatten().tolist()}, scale={self.scale.data.flatten().mean().item()})'
+        return f'{self.__class__.__name__}(shift={self.shift.weight.flatten().tolist()}, scale={self.scale.weight.flatten().mean().item()})'
     
 
 class NullScaleShift(nn.Module):
@@ -64,6 +64,7 @@ class NullScaleShift(nn.Module):
     '''
     def __init__(self):
         super(NullScaleShift, self).__init__()
+        self.z_max = 0
 
     def forward(self, inputs, z):
         return inputs
