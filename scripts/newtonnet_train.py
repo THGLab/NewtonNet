@@ -7,6 +7,7 @@ import yaml
 import json
 
 import torch
+from torch import nn
 
 from newtonnet.models import NewtonNet
 from newtonnet.train import Trainer
@@ -15,7 +16,8 @@ from newtonnet.data import parse_train_test
 from newtonnet.layers.precision import set_precison_by_string
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
-from newtonnet.layers.representation import get_representation_by_string
+from newtonnet.layers.representations import get_representation_by_string
+from newtonnet.layers.scalers import get_scaler_by_string
 from newtonnet.train.loss import get_loss_by_string
 from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
 # torch.autograd.set_detect_anomaly(True)
@@ -56,7 +58,7 @@ train_gen, val_gen, test_gen, stats = parse_train_test(
     train_root=settings['data'].get('train_root', None),
     val_root=settings['data'].get('val_root', None),
     test_root=settings['data'].get('test_root', None),
-    train_properties=settings['data'].get('train_properties', ['energy', 'forces']),
+    # train_properties=settings['data'].get('train_properties', ['energy', 'forces']),
     pre_transform=transform,
     transform=None,
     train_size=settings['data'].get('train_size', None),

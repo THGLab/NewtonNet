@@ -133,21 +133,21 @@ class Trainer(object):
         for name, parameter in self.model.named_parameters():
             if not parameter.requires_grad:
                 continue
-            # shorten names
-            name = name.replace('node_embedding', 'emb')
-            name = name.replace('message_passing_layers', 'mes')
-            name = name.replace('invariant', 'inv')
-            name = name.replace('equivariant', 'eq')
-            name = name.replace('message', 'mes')
-            name = name.replace('coefficient', 'coeff')
-            name = name.replace('feature', 'feat')
-            name = name.replace('selfupdate', 'upd')
-            name = name.replace('property', 'prop')
-            name = name.replace('prediction', 'pred')
-            name = name.replace('weight', 'w')
-            name = name.replace('bias', 'b')
-            name = name.replace('mean', 'm')
-            name = name.replace('std', 's')
+            # # shorten names
+            # name = name.replace('node_embedding', 'emb')
+            # name = name.replace('message_passing_layers', 'mes')
+            # name = name.replace('invariant', 'inv')
+            # name = name.replace('equivariant', 'eq')
+            # name = name.replace('message', 'mes')
+            # name = name.replace('coefficient', 'coeff')
+            # name = name.replace('feature', 'feat')
+            # name = name.replace('selfupdate', 'upd')
+            # name = name.replace('property', 'prop')
+            # name = name.replace('prediction', 'pred')
+            # name = name.replace('weight', 'w')
+            # name = name.replace('bias', 'b')
+            # name = name.replace('mean', 'm')
+            # name = name.replace('std', 's')
             if parameter.grad is not None:
                 layers.append(name)
                 grads.append(parameter.grad.detach().abs().mean().cpu())
@@ -180,7 +180,6 @@ class Trainer(object):
         if self.multi_gpu:
             self.model = nn.DataParallel(self.model, device_ids=self.device)
 
-        train_losses = {}
         for epoch in tqdm(range(epochs + 1)):
             # skip epochs if resuming training
             if epoch <= self.epoch:
@@ -196,80 +195,43 @@ class Trainer(object):
 
             # training
             t0 = time.time()
-            train_losses['loss'] = 0.0
             self.model.train()
 
             for train_step, train_batch in enumerate(train_generator):
-                batch_size = train_batch['atomic_numbers'].shape[0]
-
+                train_losses = {}
                 self.optimizer.zero_grad()
-                preds = self.model(
-                    atomic_numbers=train_batch['atomic_numbers'], 
-                    positions=train_batch['positions'], 
-                    atom_mask=train_batch['atom_mask'], 
-                    neighbor_mask=train_batch['neighbor_mask'],
-                    distances=train_batch['distances'],
-                    distance_vectors=train_batch['distance_vectors'],
-                    )
+                preds = self.model(train_batch.z, train_batch.pos, train_batch.edge_index, train_batch.batch)
                 main_loss = self.main_loss(preds, train_batch)
                 main_loss.backward()
                 if clip_grad > 0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
                 self.optimizer.step()
-
                 main_loss = main_loss.detach().item()
-                train_losses['loss'] += main_loss
-
-                eval_loss = self.eval_loss(preds, train_batch)
-                for key, value in eval_loss.items():
-                    train_losses[key] = train_losses.get(key, 0.0) + value.detach().item() * batch_size
-
-                if self.verbose:
-                    print(f'Train: Epoch {epoch}/{epochs} - Batch {train_step}/{len(train_generator)} - loss: {main_loss:.5f} - ', end='')
-                    print(*[f'{key}: {value:.5f}' for key, value in eval_loss.items()], sep=' - ')
-
-            for key, value in train_losses.items():
-                train_losses[key] /= len(train_generator) if key == 'loss' else len(train_generator.dataset)
+                train_losses['loss'] = main_loss
 
             # plots
             if epoch % self.check_log == 0:
                 self.plot_grad_flow(epoch)
 
             # validation
-            val_losses = {}
             if epoch % self.check_val == 0:
-                val_losses['loss'] = 0.0
                 self.model.eval()
+                val_losses = {}
 
                 for val_step, val_batch in enumerate(val_generator):
-                    batch_size = val_batch['atomic_numbers'].shape[0]
-
-                    preds = self.model(
-                        atomic_numbers=val_batch['atomic_numbers'], 
-                        positions=val_batch['positions'], 
-                        atom_mask=val_batch['atom_mask'], 
-                        neighbor_mask=val_batch['neighbor_mask'],
-                        distances=val_batch['distances'],
-                        distance_vectors=val_batch['distance_vectors'],
-                        )
-                    
-                    main_loss = self.main_loss(preds, val_batch).detach().item()
-                    val_losses['loss'] += main_loss
-
+                    preds = self.model(val_batch.z, val_batch.pos, val_batch.edge_index, val_batch.batch)
+                    main_loss = self.main_loss(preds, val_batch)
+                    val_losses['loss'] = val_losses.get('loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, val_batch)
                     for key, value in eval_loss.items():
-                        val_losses[key] = val_losses.get(key, 0.0) + value.detach().item() * batch_size
-
-                    if self.verbose:
-                        print(f'Val: Epoch {epoch}/{epochs} - Batch {val_step}/{len(val_generator)} - loss: {main_loss:.5f} - ', end='')
-                        print(*[f'{key}: {value:.5f}' for key, value in eval_loss.items()], sep=' - ')
+                        val_losses[key] = val_losses.get(key, 0.0) + value.detach().item()
 
                 for key, value in val_losses.items():
-                    val_losses[key] /= len(val_generator) if key == 'loss' else len(val_generator.dataset)
+                    val_losses[key] /= len(val_generator)
 
                 # best model
                 if epoch % self.check_model == 0:
-                    if self.best_val_loss > val_losses['loss']:
+                    if val_losses['loss'] < self.best_val_loss:
                         self.best_val_loss = val_losses['loss']
                         if self.multi_gpu:
                             save_model = self.model.module
@@ -282,35 +244,19 @@ class Trainer(object):
 
             # save test predictions
             test_losses = {}
-            test_losses['loss'] = 0.0
             if epoch % self.check_test == 0:
                 self.model.eval()
 
                 for test_step, test_batch in enumerate(test_generator):
-                    batch_size = test_batch['atomic_numbers'].shape[0]
-
-                    preds = self.model(
-                        atomic_numbers=test_batch['atomic_numbers'], 
-                        positions=test_batch['positions'], 
-                        atom_mask=test_batch['atom_mask'], 
-                        neighbor_mask=test_batch['neighbor_mask'],
-                        distances=test_batch['distances'],
-                        distance_vectors=test_batch['distance_vectors'],
-                        )
-                    
-                    main_loss = self.main_loss(preds, test_batch).detach().item()
-                    test_losses['loss'] += main_loss
-
+                    preds = self.model(test_batch.z, test_batch.pos, test_batch.edge_index, test_batch.batch)
+                    main_loss = self.main_loss(preds, test_batch)
+                    test_losses['loss'] = test_losses.get('loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, test_batch)
                     for key, value in eval_loss.items():
-                        test_losses[key] = test_losses.get(key, 0.0) + value.detach().item() * batch_size
-
-                    if self.verbose:
-                        print(f'Test: Epoch {epoch}/{epochs} - Batch {test_step}/{len(test_generator)} - loss: {main_loss:.5f} - ', end='')
-                        print(*[f'{key}: {value:.5f}' for key, value in eval_loss.items()], sep=' - ')
+                        test_losses[key] = test_losses.get(key, 0.0) + value.detach().item()
 
                 for key, value in test_losses.items():
-                    test_losses[key] /= len(test_generator) if key == 'loss' else len(test_generator.dataset)
+                    test_losses[key] /= len(test_generator)
 
             # # loss force weight decay
             # self.main_loss.force_loss_decay()

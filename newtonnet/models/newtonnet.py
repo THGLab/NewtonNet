@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch_geometric.utils import scatter
 
+from newtonnet.layers.scalers import NullScaleShift
 from newtonnet.layers.shells import ShellProvider
 from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.layers.representations import get_representation_by_string
@@ -59,17 +60,17 @@ class NewtonNet(nn.Module):
             ])
 
         # final output layer
-        self.output_layers = nn.ModuleDict({})
+        self.output_layers = nn.ModuleList()
         for key in infer_properties:
-            scaler = scalers[key] if key in scalers else None
-            output_layer = get_output_by_string(key, scaler=scaler, n_features=n_features, activation=activation)
-            self.output_layers.update({key: output_layer})
+            scaler = scalers[key] if key in scalers else NullScaleShift()
+            output_layer = get_output_by_string(key=key, scaler=scaler, n_features=n_features, activation=activation)
+            self.output_layers.append(output_layer)
             if isinstance(output_layer, FirstDerivativeProperty):
                 self.embedding_layer.requires_dr = True
-            if isinstance(output_layer, SecondDerivativeProperty):
-                dependent_property = output_layer.dependent_property
-                assert dependent_property in self.output_layers.keys(), f'cannot find dependent property {dependent_property}'
-                self.output_layers[dependent_property].requires_dr = True
+            # if isinstance(output_layer, SecondDerivativeProperty):
+            #     dependent_property = output_layer.dependent_property
+            #     assert dependent_property in self.output_layers.keys(), f'cannot find dependent property {dependent_property}'
+            #     self.output_layers[dependent_property].requires_dr = True
         
         # device
         self.to(device)
@@ -95,19 +96,28 @@ class NewtonNet(nn.Module):
             atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, disp_edge, dist_edge, edge_index)
 
         # output net
-        outputs = {
-            'z': z,
-            'pos': pos,
-            'batch': batch,
-            'atom_node': atom_node,
-            'force_node': force_node,
-            }
-        for key, output_layer in self.output_layers.items():
-            output = output_layer(**outputs)
-            outputs.update({key: output})
+        # outputs = {
+        #     'z': z,
+        #     'pos': pos,
+        #     'batch': batch,
+        #     'atom_node': atom_node,
+        #     'force_node': force_node,
+        #     }
+        outputs = CustomDataset()
+        outputs.z = z
+        outputs.pos = pos
+        outputs.batch = batch
+        outputs.atom_node = atom_node
+        outputs.force_node = force_node
+        for output_layer in self.output_layers:
+            key = output_layer.key
+            output = output_layer(outputs)
+            outputs.__setattr__(key, output)
 
         return outputs
-        
+
+class CustomDataset:
+    pass  
 
 class EmbeddingNet(nn.Module):
     '''
