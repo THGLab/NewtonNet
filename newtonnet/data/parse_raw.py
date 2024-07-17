@@ -78,8 +78,8 @@ def parse_train_test(
     print(f'data size (train, val, test): {len(train_data)}, {len(val_data)}, {len(test_data)}')
 
     # create data loader
-    train_gen = DataLoader(dataset=train_data, batch_size=train_batch_size, shuffle=False)
-    val_gen = DataLoader(dataset=val_data, batch_size=val_batch_size, shuffle=False)
+    train_gen = DataLoader(dataset=train_data, batch_size=train_batch_size, shuffle=True)
+    val_gen = DataLoader(dataset=val_data, batch_size=val_batch_size, shuffle=True)
     test_gen = DataLoader(dataset=test_data, batch_size=test_batch_size, shuffle=False)
     print(f'batch size (train, val, test): {train_batch_size}, {val_batch_size}, {test_batch_size}')
 

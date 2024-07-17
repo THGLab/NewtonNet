@@ -5,6 +5,7 @@ import os.path as osp
 import argparse
 import yaml
 import json
+import wandb
 
 import torch
 from torch import nn
@@ -121,6 +122,8 @@ lr_scheduler = get_scheduler_by_string(
     )
 
 # training
+wandb.login()
+wandb.init(**settings['training'].get('wandb_kwargs', {}), config=settings)
 trainer = Trainer(
     model=model,
     loss_fns=(main_loss, eval_loss),

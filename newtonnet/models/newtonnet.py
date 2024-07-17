@@ -190,9 +190,9 @@ class InteractionNet(nn.Module):
 
         # equivariant message passing
         self.equiv_message1 = nn.Sequential(
-            nn.Linear(n_features, n_features, bias=False),
+            nn.Linear(n_features, n_features),
             activation,
-            nn.Linear(n_features, n_features, bias=False),
+            nn.Linear(n_features, n_features),
         )
         self.equiv_message2 = nn.Sequential(
             nn.Linear(n_features, n_features),

@@ -5,6 +5,7 @@ import time
 import shutil
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import wandb
 
 import torch
 from torch import nn, optim
@@ -180,6 +181,7 @@ class Trainer(object):
         if self.multi_gpu:
             self.model = nn.DataParallel(self.model, device_ids=self.device)
 
+        step = 0
         for epoch in tqdm(range(epochs + 1)):
             # skip epochs if resuming training
             if epoch <= self.epoch:
@@ -197,8 +199,7 @@ class Trainer(object):
             t0 = time.time()
             self.model.train()
 
-            for train_step, train_batch in enumerate(train_generator):
-                train_losses = {}
+            for train_batch in train_generator:
                 self.optimizer.zero_grad()
                 preds = self.model(train_batch.z, train_batch.pos, train_batch.edge_index, train_batch.batch)
                 main_loss = self.main_loss(preds, train_batch)
@@ -207,7 +208,8 @@ class Trainer(object):
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
                 self.optimizer.step()
                 main_loss = main_loss.detach().item()
-                train_losses['loss'] = main_loss
+                wandb.log({'epoch': epoch, 'step': step, 'train_loss': main_loss, 'lr': self.optimizer.param_groups[0]['lr']})
+                step += 1
 
             # plots
             if epoch % self.check_log == 0:
@@ -221,18 +223,19 @@ class Trainer(object):
                 for val_step, val_batch in enumerate(val_generator):
                     preds = self.model(val_batch.z, val_batch.pos, val_batch.edge_index, val_batch.batch)
                     main_loss = self.main_loss(preds, val_batch)
-                    val_losses['loss'] = val_losses.get('loss', 0.0) + main_loss.detach().item()
+                    val_losses['val_loss'] = val_losses.get('val_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, val_batch)
                     for key, value in eval_loss.items():
-                        val_losses[key] = val_losses.get(key, 0.0) + value.detach().item()
+                        val_losses['val_' + key] = val_losses.get('val_' + key, 0.0) + value.detach().item()
 
                 for key, value in val_losses.items():
                     val_losses[key] /= len(val_generator)
+                wandb.log({'epoch': epoch, 'step': step} | val_losses)
 
                 # best model
                 if epoch % self.check_model == 0:
-                    if val_losses['loss'] < self.best_val_loss:
-                        self.best_val_loss = val_losses['loss']
+                    if val_losses['val_loss'] < self.best_val_loss:
+                        self.best_val_loss = val_losses['val_loss']
                         if self.multi_gpu:
                             save_model = self.model.module
                         else:
@@ -251,30 +254,31 @@ class Trainer(object):
                 for test_step, test_batch in enumerate(test_generator):
                     preds = self.model(test_batch.z, test_batch.pos, test_batch.edge_index, test_batch.batch)
                     main_loss = self.main_loss(preds, test_batch)
-                    test_losses['loss'] = test_losses.get('loss', 0.0) + main_loss.detach().item()
+                    test_losses['test_loss'] = test_losses.get('test_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, test_batch)
                     for key, value in eval_loss.items():
-                        test_losses[key] = test_losses.get(key, 0.0) + value.detach().item()
+                        test_losses['test_' + key] = test_losses.get('test_' + key, 0.0) + value.detach().item()
 
                 for key, value in test_losses.items():
                     test_losses[key] /= len(test_generator)
+                wandb.log({'epoch': epoch, 'step': step} | test_losses)
 
             # # loss force weight decay
             # self.main_loss.force_loss_decay()
 
             # checkpoint
             if epoch % self.check_log == 0:
-                checkpoint = {}
-                checkpoint.update({'epoch': epoch})
-                checkpoint.update({f'train_{key}': value for key, value in train_losses.items()})
-                checkpoint.update({f'val_{key}': value for key, value in val_losses.items()})
-                checkpoint.update({f'test_{key}': value for key, value in test_losses.items()})
-                checkpoint.update({'lr': self.optimizer.param_groups[0]['lr']})
-                checkpoint.update({'time': time.time() - t0})
-                self.log.loc[epoch] = checkpoint
-                self.log.to_csv(os.path.join(self.output_path, 'log.csv'), index=False)
-                print(f'[{epoch}/{epochs}]', end=' ')
-                print(*[f'{key}: {value:.5f}' for key, value in checkpoint.items() if key != 'epoch'], sep=' - ')
+                # checkpoint = {}
+                # checkpoint.update({'epoch': epoch})
+                # checkpoint.update({f'train_{key}': value for key, value in train_losses.items()})
+                # checkpoint.update({f'val_{key}': value for key, value in val_losses.items()})
+                # checkpoint.update({f'test_{key}': value for key, value in test_losses.items()})
+                # checkpoint.update({'lr': self.optimizer.param_groups[0]['lr']})
+                # checkpoint.update({'time': time.time() - t0})
+                # self.log.loc[epoch] = checkpoint
+                # self.log.to_csv(os.path.join(self.output_path, 'log.csv'), index=False)
+                # print(f'[{epoch}/{epochs}]', end=' ')
+                # print(*[f'{key}: {value:.5f}' for key, value in checkpoint.items() if key != 'epoch'], sep=' - ')
                 torch.save({
                         'epoch': epoch,
                         'model_state_dict': self.model.state_dict(),
