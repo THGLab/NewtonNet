@@ -36,6 +36,7 @@ if __name__ == "__main__":
             'ase',
             'tqdm',
             'pyyaml',
+            'wandb',
             'torch',
             'torch_geometric',
             # 'torch_scatter',
