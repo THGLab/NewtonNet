@@ -240,7 +240,8 @@ class Trainer(object):
                         torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
 
                 # learning rate decay
-                self.lr_scheduler.step(val_losses['loss'])
+                # self.lr_scheduler.step(val_losses['loss'])
+                self.lr_scheduler.step()
 
             # save test predictions
             test_losses = {}
