@@ -1,19 +1,9 @@
 import numpy as np
-from ase.units import *
+import ase, ase.units
+from ase.neighborlist import neighbor_list
 from ase.calculators.calculator import Calculator
-import yaml
 
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-import torch.autograd.functional as F
-
-from newtonnet.layers.activations import get_activation_by_string
-from newtonnet.layers.cutoff import CosineCutoff, PolynomialCutoff
-from newtonnet.layers.scalers import Normalizer
-from newtonnet.models import NewtonNet
-from newtonnet.data import MolecularDataset
-from newtonnet.models.output import get_output_by_string, FirstDerivativeProperty, SecondDerivativeProperty
 
 
 ##-------------------------------------
@@ -28,7 +18,7 @@ class MLAseCalculator(Calculator):
             model_path: str,
             properties: list = ['energy', 'forces'], 
             disagreement: str = 'std',
-            device: str = 'cpu',
+            device: str | list[str] = 'cpu',
             script: bool = False,
             trace_n_atoms: int = 0,
             **kwargs,
@@ -59,16 +49,16 @@ class MLAseCalculator(Calculator):
             model_path = [model_path]
         for model in model_path:
             model = torch.load(model, map_location=self.device[0])
-            for key in self.properties:
-                if key in model.output_layers.keys():
-                    continue
-                output_layer = get_output_by_string(key)
-                model.output_layers.update({key: output_layer})
-                if isinstance(output_layer, FirstDerivativeProperty):
-                    model.embedding_layer.requires_dr = True
-                if isinstance(output_layer, SecondDerivativeProperty):
-                    assert output_layer.dependent_property in model.output_layers.keys(), f'cannot find dependent property {output_layer.dependent_property}'
-                    model.output_layers[output_layer.dependent_property].requires_dr = True
+            # for key in self.properties:
+            #     if key in model.output_layers.keys():
+            #         continue
+            #     output_layer = get_output_by_string(key)
+            #     model.output_layers.update({key: output_layer})
+            #     if isinstance(output_layer, FirstDerivativeProperty):
+            #         model.embedding_layer.requires_dr = True
+            #     if isinstance(output_layer, SecondDerivativeProperty):
+            #         assert output_layer.dependent_property in model.output_layers.keys(), f'cannot find dependent property {output_layer.dependent_property}'
+            #         model.output_layers[output_layer.dependent_property].requires_dr = True
             self.dtype = next(model.named_parameters())[1].dtype
             self.models.append(model)
         
@@ -79,29 +69,22 @@ class MLAseCalculator(Calculator):
 
     def calculate(self, atoms=None, properties=['energy', 'forces'], system_changes=None):
         super().calculate(atoms, self.properties, system_changes)
-        n_atoms = len(atoms)
-        data = {
-            'positions': torch.tensor(atoms.get_positions(), dtype=self.dtype).unsqueeze(0),    # n_data, n_atoms, 3
-            'atomic_numbers': torch.tensor(atoms.get_atomic_numbers(), dtype=torch.int).unsqueeze(0),    # n_data, n_atoms
-            'atom_mask': torch.ones((1, n_atoms), dtype=torch.bool),    # n_data, n_atoms
-            'neighbor_mask': (torch.ones((1, n_atoms, n_atoms)) - torch.eye(n_atoms).unsqueeze(0)).bool(),    # n_data, n_atoms, n_atoms
-            'distances': torch.tensor(atoms.get_all_distances(mic=True), dtype=self.dtype).unsqueeze(0),    # n_data, n_atoms, n_atoms
-            'distance_vectors': torch.tensor(atoms.get_all_distances(mic=True, vector=True), dtype=self.dtype).unsqueeze(0),    # n_data, n_atoms, n_atoms, 3
-        }
-        preds = {key: [None for _ in self.models] for key in self.properties}
+        preds = {}
+        if 'energy' in self.properties:
+            preds['energy'] = np.zeros(len(self.models))
+        if 'forces' in self.properties:
+            preds['forces'] = np.zeros((len(self.models), len(atoms), 3))
+        z = torch.tensor(atoms.numbers, dtype=torch.long, device=self.device[0])
+        pos = torch.tensor(atoms.positions, dtype=torch.float, device=self.device[0])
+        edge_index = torch.tensor(neighbor_list('ij', atoms, cutoff=float(self.models[0].embedding_layer.norm.r)), dtype=torch.long, device=self.device[0])
+        batch = torch.zeros_like(z, dtype=torch.long, device=self.device[0])
         for model_, model in enumerate(self.models):
-            pred = model(
-                atomic_numbers=data['atomic_numbers'], 
-                positions=data['positions'], 
-                atom_mask=data['atom_mask'], 
-                neighbor_mask=data['neighbor_mask'], 
-                distances=data['distances'], 
-                distance_vectors=data['distance_vectors'])
-            for key in self.properties:
-                preds[key][model_] = pred[key].detach().cpu().numpy()
+            pred = model(z, pos, edge_index, batch)
+            if 'energy' in self.properties:
+                preds['energy'][model_] = pred.energy.cpu().detach().numpy()
+            if 'forces' in self.properties:
+                preds['forces'][model_] = pred.force.cpu().detach().numpy()
             del pred
-        for key in self.properties:
-            preds[key] = np.concatenate(preds[key], axis=0)
 
         self.results['outlier'] = self.q_test(preds['energy'])
         for key in self.properties:

@@ -218,24 +218,24 @@ class InteractionNet(nn.Module):
         inv_message_nodepart = self.inv_message_nodepart(atom_node)    # n_nodes, n_features
         inv_message_edgepart = self.inv_message_edgepart(dist_edge)    # n_edges, n_features
         inv_message = inv_message_edgepart * inv_message_nodepart[edge_index[0]] * inv_message_nodepart[edge_index[1]]    # n_edges, n_features
-        atom_node = atom_node + scatter(inv_message, edge_index[0], dim=0)    # n_nodes, n_features
+        atom_node = atom_node + scatter(inv_message, edge_index[0], dim=0, dim_size=atom_node.size(0))    # n_nodes, n_features
 
         # f
         equiv_message1_invedgepart = self.equiv_message1(inv_message).unsqueeze(1)    # n_edges, 1, n_features
         equiv_message1_equivedgepart = disp_edge.unsqueeze(2)    # n_edges, 3, 1
         equiv_message1 = equiv_message1_invedgepart * equiv_message1_equivedgepart    # n_edges, 3, n_features
-        force_node = force_node + scatter(equiv_message1, edge_index[0], dim=0)    # n_nodes, 3, n_features
+        force_node = force_node + scatter(equiv_message1, edge_index[0], dim=0, dim_size=force_node.size(0))    # n_nodes, 3, n_features
         
         # dr
         equiv_message2_nodepart = disp_node    # n_nodes, 3, n_features
         equiv_message2_edgepart = self.equiv_message2(inv_message).unsqueeze(1)    # n_edges, 1, n_features
         equiv_message2 = equiv_message2_edgepart * equiv_message2_nodepart[edge_index[1]]    # n_edges, 3, n_features
-        disp_node = disp_node + scatter(equiv_message2, edge_index[0], dim=0)    # n_nodes, 3, n_features
+        disp_node = disp_node + scatter(equiv_message2, edge_index[0], dim=0, dim_size=disp_node.size(0))    # n_nodes, 3, n_features
 
         equiv_message3_invnodepart = self.equiv_message3(atom_node).unsqueeze(1)    # n_nodes, 1, n_features
         equiv_message3_equivnodepart = scatter(equiv_message1, edge_index[0], dim=0)    # n_nodes, 3, n_features
         equiv_message3 = equiv_message3_invnodepart[edge_index[1]] * equiv_message3_equivnodepart[edge_index[1]]    # n_edges, 3, n_features
-        disp_node = disp_node + scatter(equiv_message3, edge_index[0], dim=0)    # n_nodes, 3, n_features
+        disp_node = disp_node + scatter(equiv_message3, edge_index[0], dim=0, dim_size=disp_node.size(0))    # n_nodes, 3, n_features
 
         # update energy
         inv_update = self.inv_update(atom_node) * torch.sum(- force_node * disp_node, dim=-2)  # n_nodes, n_features
