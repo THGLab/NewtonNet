@@ -184,15 +184,15 @@ class InteractionNet(nn.Module):
             activation,
             nn.Linear(n_features, n_features),
         )
-        self.inv_message_edgepart = nn.Linear(n_basis, n_features)
+        self.inv_message_edgepart = nn.Linear(n_basis, n_features, bias=False)
         nn.init.xavier_uniform_(self.inv_message_edgepart.weight)
-        nn.init.zeros_(self.inv_message_edgepart.bias)
+        # nn.init.zeros_(self.inv_message_edgepart.bias)
 
         # equivariant message passing
         self.equiv_message1 = nn.Sequential(
-            nn.Linear(n_features, n_features),
+            nn.Linear(n_features, n_features, bias=False),
             activation,
-            nn.Linear(n_features, n_features),
+            nn.Linear(n_features, n_features, bias=False),
         )
         self.equiv_message2 = nn.Sequential(
             nn.Linear(n_features, n_features),
@@ -200,9 +200,9 @@ class InteractionNet(nn.Module):
             nn.Linear(n_features, n_features),
         )
         self.equiv_message3 = nn.Sequential(
-            nn.Linear(n_features, n_features, bias=False),
+            nn.Linear(n_features, n_features),
             activation,
-            nn.Linear(n_features, n_features, bias=False),
+            nn.Linear(n_features, n_features),
         )
 
         self.inv_update = nn.Sequential(
