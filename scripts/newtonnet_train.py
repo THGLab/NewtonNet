@@ -62,6 +62,7 @@ train_gen, val_gen, test_gen, stats = parse_train_test(
     # train_properties=settings['data'].get('train_properties', ['energy', 'forces']),
     pre_transform=transform,
     transform=None,
+    force_reload=settings['data'].get('force_reload', False),
     train_size=settings['data'].get('train_size', None),
     val_size=settings['data'].get('val_size', None),
     test_size=settings['data'].get('test_size', None),
