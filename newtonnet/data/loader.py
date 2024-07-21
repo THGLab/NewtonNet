@@ -72,12 +72,13 @@ class MolecularDataset(InMemoryDataset):
     def calc_stats(self, data_list: List[Data], stats_path: str) -> None:
         formula_list, energy_list = [], []
         for data in data_list:
-            formula_list.append(torch.bincount(data.z, minlength=128))
+            formula_list.append(torch.bincount(data.z, minlength=10))
             energy_list.append(data.energy)
 
         formula = torch.stack(formula_list, dim=0).float()
         energy = torch.cat(energy_list, dim=0)
-        energy_shifts = torch.linalg.lstsq(formula, energy).solution
+        energy_shifts = torch.linalg.lstsq(formula.float(), energy, driver='gelsd').solution
+        energy_shifts[energy_shifts.abs() < 1e-12] = 0
         energy_scale = ((energy - torch.matmul(formula, energy_shifts)).square().sum() / (formula).sum()).sqrt()
 
         with open(stats_path, 'w') as f:
