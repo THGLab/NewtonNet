@@ -54,7 +54,12 @@ class MolecularDataset(InMemoryDataset):
             force = torch.from_numpy(raw_data['F']).float()
 
             for i in range(pos.size(0)):
-                data = Data(z=z, pos=pos[i], energy=energy[i], force=force[i])
+                data = Data(
+                    z=z.reshape(-1) if z.dim() < 2 else z[i].reshape(-1),
+                    pos=pos[i].reshape(-1, 3),
+                    energy=energy[i].reshape(-1),
+                    force=force[i].reshape(-1, 3),
+                    )
                 if self.pre_filter is not None and not self.pre_filter(data):
                     continue
                 if self.pre_transform is not None:
