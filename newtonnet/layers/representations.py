@@ -24,7 +24,7 @@ class RadialBesselLayer(nn.Module):
     def __init__(self, n_basis=16):
         super(RadialBesselLayer, self).__init__()
         self.n_basis = n_basis
-        self.frequencies = nn.Parameter(torch.arange(1, self.n_basis + 1, requires_grad=False) * torch.pi)
+        self.frequencies = nn.Parameter(torch.arange(1, self.n_basis + 1) * torch.pi, requires_grad=False)
         self.epsilon = 1.0e-8
 
     def forward(self, dist):
