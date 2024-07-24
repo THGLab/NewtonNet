@@ -149,8 +149,8 @@ class EmbeddingNet(nn.Module):
 
         # initialize node representations
         atom_node = self.node_embedding(z)  # n_nodes, n_features
-        force_node = torch.zeros(*pos.shape, self.n_features)  # n_nodes, 3, n_features
-        disp_node = torch.zeros(*pos.shape, self.n_features)  # n_nodes, 3, n_features
+        force_node = torch.zeros(*pos.shape, self.n_features, dtype=pos.dtype, device=pos.device)  # n_nodes, 3, n_features
+        disp_node = torch.zeros(*pos.shape, self.n_features, dtype=pos.dtype, device=pos.device)  # n_nodes, 3, n_features
 
         # recompute distances and distance vectors
         if self.requires_dr:

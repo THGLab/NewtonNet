@@ -9,6 +9,7 @@ import wandb
 
 import torch
 from torch import nn
+from torch_geometric.transforms import ToDevice, Compose 
 
 from newtonnet.models import NewtonNet
 from newtonnet.train import Trainer
@@ -54,7 +55,10 @@ else:
 
 # data
 torch.manual_seed(settings['data'].get('random_states', 42))
-transform = RadiusGraph(settings['data'].get('cutoff', 5.0))
+transform = Compose([
+    RadiusGraph(settings['data'].get('cutoff', 5.0)),
+    ToDevice(device[0]),
+    ])
 train_gen, val_gen, test_gen, stats = parse_train_test(
     train_root=settings['data'].get('train_root', None),
     val_root=settings['data'].get('val_root', None),
@@ -78,7 +82,7 @@ for key in settings['data'].get('train_properties', ['energy', 'forces']):
 distance_network = nn.ModuleDict({
     'scalednorm': get_cutoff_by_string(
         'scalednorm',
-        cutoff=transform.r,
+        cutoff=transform.transforms[0].r,
         ),
     'cutoff': get_cutoff_by_string(
         settings['model'].get('cutoff_network', 'poly'), 
@@ -116,8 +120,13 @@ optimizer = get_optimizer_by_string(
     trainable_params,
     **settings['training'].get('optimizer_kwargs', {}),
     )
+lr_warmup = get_scheduler_by_string(
+    settings['training'].get('lr_warmup', None),
+    optimizer,
+    **settings['training'].get('lr_warmup_kwargs', {}),
+    )
 lr_scheduler = get_scheduler_by_string(
-    settings['training'].get('lr_scheduler', 'plateau'),
+    settings['training'].get('lr_scheduler', None),
     optimizer,
     **settings['training'].get('lr_scheduler_kwargs', {}),
     )
@@ -129,6 +138,7 @@ trainer = Trainer(
     model=model,
     loss_fns=(main_loss, eval_loss),
     optimizer=optimizer,
+    lr_warmup=lr_warmup,
     lr_scheduler=lr_scheduler,
     output_base_path=output_base_path,
     script_path=script_path,

@@ -1,5 +1,5 @@
 from torch.optim import Adam, SGD, RMSprop, AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, OneCycleLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, OneCycleLR, LinearLR
 
 
 def get_optimizer_by_string(optimizer_name, parameters, **kwargs):
@@ -61,6 +61,10 @@ def get_scheduler_by_string(scheduler_name, optimizer, **kwargs):
         scheduler = LambdaLR(optimizer, **kwargs)
     elif scheduler_name == 'onecycle':
         scheduler = OneCycleLR(optimizer, **kwargs)
+    elif scheduler_name == 'linear':
+        scheduler = LinearLR(optimizer, **kwargs)
+    elif scheduler_name is None:
+        scheduler = None
     else:
         raise ValueError(f'scheduler {scheduler_name} is not supported')
     return scheduler
