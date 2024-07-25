@@ -89,11 +89,11 @@ class NewtonNet(nn.Module):
             outputs (dict): The outputs of the network.
         '''
         # initialize node and edge representations
-        atom_node, force_node, disp_node, disp_edge, dist_edge = self.embedding_layer(z, pos, edge_index)
+        atom_node, force_node, disp_node, dir_edge, dist_edge = self.embedding_layer(z, pos, edge_index)
 
         # compute interaction block and update atomic embeddings
         for interaction_layer in self.interaction_layers:
-            atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, disp_edge, dist_edge, edge_index)
+            atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index)
 
         # output net
         # outputs = {
@@ -158,10 +158,10 @@ class EmbeddingNet(nn.Module):
             disp_edge = pos[edge_index[0]] - pos[edge_index[1]]  # n_edges, 3
 
         # initialize edge representations
-        dist = self.norm(disp_edge)  # n_edges, 1
-        dist_edge = self.cutoff(dist) * self.edge_embedding(dist)  # n_edges, n_basis
+        dist_edge, dir_edge = self.norm(disp_edge)  # n_edges, 1; n_edges, 3
+        dist_edge = self.cutoff(dist_edge) * self.edge_embedding(dist_edge)  # n_edges, n_basis
 
-        return atom_node, force_node, disp_node, disp_edge, dist_edge
+        return atom_node, force_node, disp_node, dir_edge, dist_edge
 
 
 class InteractionNet(nn.Module):
@@ -179,33 +179,49 @@ class InteractionNet(nn.Module):
         self.n_features = n_features
 
         # invariant message passing
-        self.inv_message_nodepart = nn.Sequential(
+        self.message_nodepart = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
             nn.Linear(n_features, n_features),
         )
-        self.inv_message_edgepart = nn.Linear(n_basis, n_features, bias=False)
-        nn.init.xavier_uniform_(self.inv_message_edgepart.weight)
+        self.message_edgepart = nn.Linear(n_basis, n_features, bias=False)
+        nn.init.xavier_uniform_(self.message_edgepart.weight)
         # nn.init.zeros_(self.inv_message_edgepart.bias)
+        # self.message_edgepart = nn.Sequential(
+        #     nn.Linear(n_basis, n_features, bias=False),
+        #     activation,
+        #     nn.Linear(n_features, n_features, bias=False),
+        # )
+
+        self.inv_message = nn.Sequential(
+            nn.Linear(n_features, n_features, bias=False),
+            activation,
+            nn.Linear(n_features, n_features, bias=False),
+        )
 
         # equivariant message passing
         self.equiv_message1 = nn.Sequential(
-            nn.Linear(n_features, n_features),
+            nn.Linear(n_features, n_features, bias=False),
             activation,
-            nn.Linear(n_features, n_features),
+            nn.Linear(n_features, n_features, bias=False),
         )
         self.equiv_message2 = nn.Sequential(
-            nn.Linear(n_features, n_features),
+            nn.Linear(n_features, n_features, bias=False),
             activation,
-            nn.Linear(n_features, n_features),
+            nn.Linear(n_features, n_features, bias=False),
         )
-        self.equiv_message3 = nn.Sequential(
-            nn.Linear(n_features, n_features),
-            activation,
-            nn.Linear(n_features, n_features),
-        )
+        # self.equiv_message3 = nn.Sequential(
+        #     nn.Linear(n_features, n_features),
+        #     activation,
+        #     nn.Linear(n_features, n_features),
+        # )
 
-        self.inv_update = nn.Sequential(
+        # self.inv_update1 = nn.Sequential(
+        #     nn.Linear(n_features, n_features),
+        #     activation,
+        #     nn.Linear(n_features, n_features),
+        # )
+        self.inv_update2 = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
             nn.Linear(n_features, n_features),
@@ -213,35 +229,47 @@ class InteractionNet(nn.Module):
 
         self.norm = nn.LayerNorm(n_features)
     
-    def forward(self, atom_node, force_node, disp_node, disp_edge, dist_edge, edge_index):
+    def forward(self, atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index):
         # a
-        inv_message_nodepart = self.inv_message_nodepart(atom_node)    # n_nodes, n_features
-        inv_message_edgepart = self.inv_message_edgepart(dist_edge)    # n_edges, n_features
-        inv_message = inv_message_edgepart * inv_message_nodepart[edge_index[0]] * inv_message_nodepart[edge_index[1]]    # n_edges, n_features
-        atom_node = atom_node + scatter(inv_message, edge_index[0], dim=0, dim_size=atom_node.size(0))    # n_nodes, n_features
+        message_nodepart = self.message_nodepart(atom_node)    # n_nodes, n_features
+        message_edgepart = self.message_edgepart(dist_edge)    # n_edges, n_features
+        message = message_edgepart * message_nodepart[edge_index[0]] * message_nodepart[edge_index[1]]    # n_edges, n_features
 
-        # f
-        equiv_message1_invedgepart = self.equiv_message1(inv_message).unsqueeze(1)    # n_edges, 1, n_features
-        equiv_message1_equivedgepart = disp_edge.unsqueeze(2)    # n_edges, 3, 1
-        equiv_message1 = equiv_message1_invedgepart * equiv_message1_equivedgepart    # n_edges, 3, n_features
-        force_node = force_node + scatter(equiv_message1, edge_index[0], dim=0, dim_size=force_node.size(0))    # n_nodes, 3, n_features
+        inv_message1 = self.inv_message(message)    # n_nodes, n_features
+        inv_update1 = scatter(inv_message1, edge_index[0], dim=0, dim_size=atom_node.size(0))    # n_nodes, n_features
+        atom_node = atom_node + inv_update1    # n_nodes, n_features
+
+        # # f
+        # equiv_message1_invpart = self.equiv_message1(message).unsqueeze(1)    # n_edges, 1, n_features
+        # equiv_message1_equivpart = dir_edge.unsqueeze(2)    # n_edges, 3, 1
+        # equiv_message1 = equiv_message1_invpart * equiv_message1_equivpart    # n_edges, 3, n_features
+        # force_update1 = scatter(equiv_message1, edge_index[0], dim=0, dim_size=force_node.size(0))    # n_nodes, 3, n_features
+
+        # equiv_message2_invpart = self.equiv_message2(message).unsqueeze(1)    # n_edges, 1, n_features
+        # equiv_message2_equivpart = force_node[edge_index[1]]    # n_edges, 3, n_features
+        # equiv_message2 = equiv_message2_invpart * equiv_message2_equivpart    # n_edges, 3, n_features
+        # force_update2 = scatter(equiv_message2, edge_index[0], dim=0, dim_size=force_node.size(0))    # n_nodes, 3, n_features
+
+        # force_node = force_node + force_update1 + force_update2    # n_nodes, 3, n_features
         
-        # dr
-        equiv_message2_nodepart = disp_node    # n_nodes, 3, n_features
-        equiv_message2_edgepart = self.equiv_message2(inv_message).unsqueeze(1)    # n_edges, 1, n_features
-        equiv_message2 = equiv_message2_edgepart * equiv_message2_nodepart[edge_index[1]]    # n_edges, 3, n_features
-        disp_node = disp_node + scatter(equiv_message2, edge_index[0], dim=0, dim_size=disp_node.size(0))    # n_nodes, 3, n_features
+        # # dr
+        # # equiv_message2_nodepart = disp_node    # n_nodes, 3, n_features
+        # # equiv_message2_edgepart = self.equiv_message2(inv_message).unsqueeze(1)    # n_edges, 1, n_features
+        # # equiv_message2 = equiv_message2_edgepart * equiv_message2_nodepart[edge_index[1]]    # n_edges, 3, n_features
+        # # disp_node = disp_node + scatter(equiv_message2, edge_index[0], dim=0, dim_size=disp_node.size(0))    # n_nodes, 3, n_features
 
-        equiv_message3_invnodepart = self.equiv_message3(atom_node).unsqueeze(1)    # n_nodes, 1, n_features
-        equiv_message3_equivnodepart = scatter(equiv_message1, edge_index[0], dim=0)    # n_nodes, 3, n_features
-        equiv_message3 = equiv_message3_invnodepart[edge_index[1]] * equiv_message3_equivnodepart[edge_index[1]]    # n_edges, 3, n_features
-        disp_node = disp_node + scatter(equiv_message3, edge_index[0], dim=0, dim_size=disp_node.size(0))    # n_nodes, 3, n_features
+        # # equiv_message3_invnodepart = self.equiv_message3(atom_node).unsqueeze(1)    # n_nodes, 1, n_features
+        # # equiv_message3_equivnodepart = force_update    # n_nodes, 3, n_features
+        # # equiv_message3 = equiv_message3_invnodepart * equiv_message3_equivnodepart    # n_nodes, 3, n_features
+        # # disp_update = scatter(equiv_message3[edge_index[1]], edge_index[0], dim=0, dim_size=disp_node.size(0))    # n_nodes, 3, n_features
+        # # disp_node = disp_node + disp_update    # n_nodes, 3, n_features
 
-        # update energy
-        inv_update = self.inv_update(atom_node) * torch.sum(- force_node * disp_node, dim=-2)  # n_nodes, n_features
-        atom_node = atom_node + inv_update
+        # # update energy
+        # # inv_update = self.inv_update(atom_node) * torch.sum(- force_node * disp_node, dim=1)  # n_nodes, n_features
+        # inv_update2 = self.inv_update2(atom_node * torch.sum(force_node * force_node, dim=1))    # n_nodes, n_features
+        # atom_node = atom_node + inv_update2
 
         # layer norm
-        atom_node = self.norm(atom_node)
+        # atom_node = self.norm(atom_node)
 
         return atom_node, force_node, disp_node

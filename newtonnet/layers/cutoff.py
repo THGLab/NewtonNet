@@ -38,9 +38,11 @@ class ScaledNorm(nn.Module):
 
         """
         # Compute values of scaled norm
-        dist = torch.norm(disp, dim=-1, keepdim=True) / self.r
+        dist = torch.norm(disp, dim=-1, keepdim=True)
+        dir = disp / dist
+        dist = dist / self.r
 
-        return dist
+        return dist, dir
 
 class PolynomialCutoff(nn.Module):
     '''

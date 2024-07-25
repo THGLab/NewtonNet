@@ -2,6 +2,7 @@ import os
 import os.path as osp
 from typing import Callable, List, Optional, Union
 import json
+from ase import units
 
 import numpy as np
 import torch
@@ -70,16 +71,18 @@ class MolecularDataset(InMemoryDataset):
         self.calc_stats(data_list, stats_path)
 
     def calc_stats(self, data_list: List[Data], stats_path: str) -> None:
-        formula_list, energy_list = [], []
+        formula_list, energy_list, force_list = [], [], []
         for data in data_list:
             formula_list.append(torch.bincount(data.z, minlength=10))
             energy_list.append(data.energy)
+            force_list.append(data.force.norm(dim=-1))
 
         formula = torch.stack(formula_list, dim=0).float().cpu()
         energy = torch.cat(energy_list, dim=0).cpu()
         energy_shifts = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
         energy_shifts[energy_shifts.abs() < 1e-12] = 0
-        energy_scale = ((energy - torch.matmul(formula, energy_shifts)).square().sum() / (formula).sum()).sqrt()
+        # energy_scale = ((energy - torch.matmul(formula, energy_shifts)).square().sum() / (formula).sum()).sqrt()
+        energy_scale = (energy - torch.matmul(formula, energy_shifts)).std()
 
         with open(stats_path, 'w') as f:
             z, energy_shift = dense_to_sparse(energy_shifts.unsqueeze(-1))
