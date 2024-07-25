@@ -9,7 +9,8 @@ import wandb
 
 import torch
 from torch import nn, optim
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim import SGD
+from torch.optim.lr_scheduler import ReduceLROnPlateau, LRScheduler
 
 from newtonnet.train.loss import get_loss_by_string
 
@@ -39,6 +40,7 @@ class Trainer(object):
             model: nn.Module,
             loss_fns: (nn.Module, nn.Module) = None,
             optimizer: optim.Optimizer = None,
+            lr_warmup: optim.lr_scheduler._LRScheduler = None,
             lr_scheduler: optim.lr_scheduler._LRScheduler = None,
             output_base_path: str = None,
             script_path: str = None,
@@ -59,7 +61,8 @@ class Trainer(object):
         trainable_params = filter(lambda p: p.requires_grad, self.model.parameters())
         self.main_loss, self.eval_loss = loss_fns or get_loss_by_string()
         self.optimizer = optimizer or optim.Adam(trainable_params)
-        self.lr_scheduler = lr_scheduler or ReduceLROnPlateau(self.optimizer)
+        self.lr_warmup = lr_warmup
+        self.lr_scheduler = lr_scheduler
         self.best_val_loss = torch.inf
         self.device = device
         self.multi_gpu = True if type(device) is list and len(device) > 1 else False
@@ -181,22 +184,33 @@ class Trainer(object):
         if self.multi_gpu:
             self.model = nn.DataParallel(self.model, device_ids=self.device)
 
+        # for epoch in range(1):
+        #     self.model.train()
+        #     optimizer = SGD([param for name, param in self.model.named_parameters() if 'scaler' in name], lr=1.0)
+        #     for train_batch in train_generator:
+        #         optimizer.zero_grad()
+        #         preds = self.model(train_batch.z, train_batch.pos, train_batch.edge_index, train_batch.batch)
+        #         loss = self.main_loss(preds, train_batch)
+        #         loss.backward()
+        #         optimizer.step()
+        # print(self.model)
+                
+
         step = 0
         for epoch in tqdm(range(epochs + 1)):
-            # skip epochs if resuming training
-            if epoch <= self.epoch:
-                for train_step, train_batch in enumerate(train_generator):
-                    pass
-                if epoch % self.check_val == 0:
-                    for val_step, val_batch in enumerate(val_generator):
-                        pass
-                if epoch % self.check_test == 0:
-                    for test_step, test_batch in enumerate(test_generator):
-                        pass
-                continue
+            # # skip epochs if resuming training
+            # if epoch <= self.epoch:
+            #     for train_step, train_batch in enumerate(train_generator):
+            #         pass
+            #     if epoch % self.check_val == 0:
+            #         for val_step, val_batch in enumerate(val_generator):
+            #             pass
+            #     if epoch % self.check_test == 0:
+            #         for test_step, test_batch in enumerate(test_generator):
+            #             pass
+            #     continue
 
             # training
-            t0 = time.time()
             self.model.train()
 
             for train_batch in train_generator:
@@ -220,13 +234,13 @@ class Trainer(object):
                 self.model.eval()
                 val_losses = {}
 
-                for val_step, val_batch in enumerate(val_generator):
+                for val_batch in val_generator:
                     preds = self.model(val_batch.z, val_batch.pos, val_batch.edge_index, val_batch.batch)
                     main_loss = self.main_loss(preds, val_batch)
                     val_losses['val_loss'] = val_losses.get('val_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, val_batch)
                     for key, value in eval_loss.items():
-                        val_losses['val_' + key] = val_losses.get('val_' + key, 0.0) + value.detach().item()
+                        val_losses[f'val_{key}'] = val_losses.get(f'val_{key}', 0.0) + value.detach().item()
 
                 for key, value in val_losses.items():
                     val_losses[key] /= len(val_generator)
@@ -242,8 +256,12 @@ class Trainer(object):
                             save_model = self.model
                         torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
 
-                # learning rate decay
-                # self.lr_scheduler.step(val_losses['loss'])
+            # learning rate decay
+            if isinstance(self.lr_warmup, LRScheduler):
+                self.lr_warmup.step()
+            if isinstance(self.lr_scheduler, ReduceLROnPlateau):
+                self.lr_scheduler.step(val_losses['val_loss'])
+            elif isinstance(self.lr_scheduler, LRScheduler):
                 self.lr_scheduler.step()
 
             # save test predictions
@@ -251,13 +269,13 @@ class Trainer(object):
             if epoch % self.check_test == 0:
                 self.model.eval()
 
-                for test_step, test_batch in enumerate(test_generator):
+                for test_batch in test_generator:
                     preds = self.model(test_batch.z, test_batch.pos, test_batch.edge_index, test_batch.batch)
                     main_loss = self.main_loss(preds, test_batch)
                     test_losses['test_loss'] = test_losses.get('test_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, test_batch)
                     for key, value in eval_loss.items():
-                        test_losses['test_' + key] = test_losses.get('test_' + key, 0.0) + value.detach().item()
+                        test_losses[f'test_{key}'] = test_losses.get(f'test_{key}' + key, 0.0) + value.detach().item()
 
                 for key, value in test_losses.items():
                     test_losses[key] /= len(test_generator)

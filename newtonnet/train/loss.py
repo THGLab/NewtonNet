@@ -14,14 +14,23 @@ def get_loss_by_string(mode=None, **kwargs):
         w_force_dir (float): The weight for the force direction loss. Default: 0.0.
 
     Returns:
+        pre_loss (nn.Module): The pre-training loss function for model initialization.
         main_loss (nn.Module): The main loss function for model training (back propagation) and validation (learning rate scheduling).
         eval_loss (nn.Module): The evaluation loss function for task-specific model evaluation.
     '''
     if mode is None:
+        pre_loss = MultitaskLoss(loss_fns=[], sum=True)
         main_loss = MultitaskLoss(loss_fns=[], sum=True)
         eval_loss = MultitaskLoss(loss_fns=[], sum=False)
 
     elif mode == 'energy':
+        pre_losses = []
+        weights = []
+        if kwargs.get('w_energy', 0.0) > 0.0:
+            pre_losses.append(EnergyDistributionLoss(mode='mse'))
+            weights.append(1.0)
+        pre_loss = MultitaskLoss(loss_fns=pre_losses, sum=True, weights=weights)
+
         main_losses = []
         weights = []
         if kwargs.get('w_energy', 0.0) > 0.0:
@@ -37,6 +46,13 @@ def get_loss_by_string(mode=None, **kwargs):
         eval_loss = MultitaskLoss(loss_fns=eval_losses, sum=False)
 
     elif mode == 'energy/forces':
+        pre_losses = []
+        weights = []
+        if kwargs.get('w_energy', 0.0) > 0.0:
+            pre_losses.append(EnergyDistributionLoss(mode='mse'))
+            weights.append(1.0)
+        pre_loss = MultitaskLoss(loss_fns=pre_losses, sum=True, weights=weights)
+
         main_losses = []
         weights = []
         if kwargs.get('w_energy', 0.0) > 0.0:
@@ -96,8 +112,17 @@ class EnergyPerAtomLoss(BaseLoss):
         self.name = f'energy_per_atom_{self.mode}'
 
     def forward(self, pred, data):
-        n_atoms = scatter(data.z, data.batch)
+        n_atoms = scatter(torch.ones_like(data.z), data.batch)
         loss = self.loss_fn(pred.energy / n_atoms, data.energy / n_atoms)
+        return loss
+    
+class EnergyDistributionLoss(BaseLoss):
+    def __init__(self, mode='mse'):
+        super(EnergyDistributionLoss, self).__init__(mode)
+        self.name = f'energy_distribution_{self.mode}'
+
+    def forward(self, pred, data):
+        loss = self.loss_fn(pred.energy.mean(), data.energy.mean()) + self.loss_fn(pred.energy.std(), data.energy.std())
         return loss
 
 class ForcesLoss(BaseLoss):
@@ -197,6 +222,6 @@ class MultitaskLoss(nn.Module):
 
     def forward(self, pred, data):
         if self.sum:
-            return sum([loss_fn(pred, data) for loss_fn in self.loss_fns])
+            return sum([loss_fn(pred, data) * weight for loss_fn, weight in zip(self.loss_fns, self.weights)])
         else:
             return {loss_fn.name: loss_fn(pred, data) for loss_fn in self.loss_fns}

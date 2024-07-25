@@ -57,7 +57,7 @@ class EnergyOutput(DirectProperty):
     def forward(self, inputs):
         output = self.layers(inputs.atom_node)
         output = self.scaler(output, inputs.z)
-        output = scatter(output, inputs.batch, dim=0, reduce='sum').flatten()
+        output = scatter(output, inputs.batch, dim=0, reduce='sum').reshape(-1)
         return output
 
 class GradientForceOutput(FirstDerivativeProperty):

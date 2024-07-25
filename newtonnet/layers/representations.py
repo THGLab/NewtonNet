@@ -37,6 +37,6 @@ class RadialBesselLayer(nn.Module):
         Returns:
             torch.Tensor: edge embedding of shape (batch_size, n_atoms, n_atoms, n_radials).
         '''
-        out = torch.sin(self.frequencies * dist) / (dist + self.epsilon) / self.frequencies
+        out = torch.sin(self.frequencies * dist) / dist #/ self.frequencies
 
         return out

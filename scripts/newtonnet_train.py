@@ -103,6 +103,7 @@ else:
         distance_network=distance_network,
         n_interactions=settings['model'].get('n_interactions', 3),
         infer_properties=settings['model'].get('infer_properties', ['energy', 'forces']),
+        activation=get_activation_by_string(settings['model'].get('activation', 'swish')),
         scalers=scalers,
         device=device[0],
         )
