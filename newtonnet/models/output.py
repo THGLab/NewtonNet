@@ -48,10 +48,11 @@ class EnergyOutput(DirectProperty):
         self.layers = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
-            nn.Linear(n_features, n_features),
+            nn.Linear(n_features, 64),
             activation,
-            nn.Linear(n_features, 1),
+            nn.Linear(64, 1),
             )
+        print(self.layers[0].weight.std())
         self.scaler = scaler
 
     def forward(self, inputs):
