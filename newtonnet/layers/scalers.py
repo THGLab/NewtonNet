@@ -34,14 +34,14 @@ class ScaleShift(nn.Module):
         shift_dense[z] = shift
         self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1), freeze=True)
         if scale.ndim == 0:
-            self.scale = nn.Embedding.from_pretrained(torch.full((self.z_max + 1, 1), scale), freeze=True)
-            # self.scale = nn.Parameter(scale, requires_grad=False)
-            # self.single_scale = True
+            # self.scale = nn.Embedding.from_pretrained(torch.full((self.z_max + 1, 1), scale), freeze=True)
+            self.scale = nn.Parameter(scale, requires_grad=False)
+            self.single_scale = True
         else:
             scale_dense = torch.zeros(self.z_max + 1)
             scale_dense[z] = scale
             self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1), freeze=True)
-            # self.single_scale = False
+            self.single_scale = False
 
     def forward(self, inputs, z):
         '''
@@ -54,11 +54,11 @@ class ScaleShift(nn.Module):
         Returns:
             torch.Tensor: The normalized inputs.
         '''
-        # if self.single_scale:
-        #     outputs = inputs * self.scale + self.shift(z)
-        # else:
-        #     outputs = inputs * self.scale(z) + self.shift(z)
-        outputs = inputs * self.scale(z) + self.shift(z)
+        if self.single_scale:
+            outputs = inputs * self.scale + self.shift(z)
+        else:
+            outputs = inputs * self.scale(z) + self.shift(z)
+        # outputs = inputs * self.scale(z) + self.shift(z)
         # outputs = inputs + self.shift(z)
         return outputs
     

@@ -55,17 +55,20 @@ else:
 
 # data
 torch.manual_seed(settings['data'].get('random_states', 42))
-transform = Compose([
+pre_transform = Compose([
     RadiusGraph(settings['data'].get('cutoff', 5.0)),
     ToDevice(device[0]),
     ])
+transform = None
+# pre_transform = RadiusGraph(settings['data'].get('cutoff', 5.0))
+# transform = ToDevice(device[0])
 train_gen, val_gen, test_gen, stats = parse_train_test(
     train_root=settings['data'].get('train_root', None),
     val_root=settings['data'].get('val_root', None),
     test_root=settings['data'].get('test_root', None),
     # train_properties=settings['data'].get('train_properties', ['energy', 'forces']),
-    pre_transform=transform,
-    transform=None,
+    pre_transform=pre_transform,
+    transform=transform,
     force_reload=settings['data'].get('force_reload', False),
     train_size=settings['data'].get('train_size', None),
     val_size=settings['data'].get('val_size', None),
@@ -82,7 +85,8 @@ for key in settings['data'].get('train_properties', ['energy', 'forces']):
 distance_network = nn.ModuleDict({
     'scalednorm': get_cutoff_by_string(
         'scalednorm',
-        cutoff=transform.transforms[0].r,
+        cutoff=pre_transform.transforms[0].r,
+        # cutoff=pre_transform.r,
         ),
     'cutoff': get_cutoff_by_string(
         settings['model'].get('cutoff_network', 'poly'), 
