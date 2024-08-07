@@ -71,10 +71,16 @@ class GradientForceOutput(FirstDerivativeProperty):
         self.requires_dr = False
 
     def forward(self, inputs):
+        # output = grad(
+        #     inputs.energy.sum(), 
+        #     inputs.pos, 
+        #     create_graph=True, 
+        #     retain_graph=True,
+            # )[0]
         output = grad(
-            inputs.energy.sum(), 
+            inputs.energy, 
             inputs.pos, 
-            # grad_outputs=torch.ones_like(inputs.pos), 
+            grad_outputs=torch.ones_like(inputs.energy),
             create_graph=True, 
             retain_graph=True,
             )[0]
