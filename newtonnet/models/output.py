@@ -76,7 +76,7 @@ class GradientForceOutput(FirstDerivativeProperty):
             inputs.energy.sum(), 
             inputs.pos, 
             # grad_outputs=torch.ones_like(inputs.pos), 
-            create_graph=self.requires_dr, 
+            create_graph=True, 
             retain_graph=True,
             )[0]
         return -output
