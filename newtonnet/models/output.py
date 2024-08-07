@@ -48,18 +48,17 @@ class EnergyOutput(DirectProperty):
         self.layers = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
-            nn.Linear(n_features, 64),
+            nn.Linear(n_features, n_features),
             activation,
-            nn.Linear(64, 1),
+            nn.Linear(n_features, 1),
             )
         print(self.layers[0].weight.std())
         self.scaler = scaler
 
     def forward(self, inputs):
         output = self.layers(inputs.atom_node)
-        # output = self.scaler(output, inputs.z)
+        output = self.scaler(output, inputs.z)
         output = scatter(output, inputs.batch, dim=0, reduce='sum').reshape(-1)
-        output = output * 5.992277830325989 + -406274.63784969115
         return output
 
 class GradientForceOutput(FirstDerivativeProperty):
