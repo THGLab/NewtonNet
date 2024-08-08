@@ -79,7 +79,9 @@ class MLAseCalculator(Calculator):
         try:
             edge_index = torch.tensor(atoms.edge_index, dtype=torch.long, device=self.device[0])
         except AttributeError:
-            edge_index = torch.tensor(np.stack(neighbor_list('ij', atoms, cutoff=float(self.models[0].embedding_layer.norm.r))), dtype=torch.long, device=self.device[0])
+            edge_index = torch.tensor(
+                np.stack(neighbor_list('ij', atoms, cutoff=float(self.models[0].embedding_layer.norm.r))), 
+                dtype=torch.long, device=self.device[0])
         batch = torch.zeros_like(z, dtype=torch.long, device=self.device[0])
         for model_, model in enumerate(self.models):
             pred = model(z, pos, edge_index, batch)
