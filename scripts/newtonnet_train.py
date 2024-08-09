@@ -84,10 +84,7 @@ else:
     model.to(precision)
 
 # loss
-main_loss, eval_loss = get_loss_by_string(
-    settings['training'].get('loss', None),
-    **settings['training'].get('loss_kwargs', {}),
-    )
+main_loss, eval_loss = get_loss_by_string(settings['training'].pop('loss', None))
 
 # optimizer
 trainable_params = filter(lambda p: p.requires_grad, model.parameters())

@@ -25,6 +25,7 @@ def get_loss_by_string(losses):
     '''
     main_losses = []
     eval_losses = []
+    assert losses is not None, 'losses is not defined.'
     for key, kwargs in losses.items():
         if key == 'energy':
             main_losses.append(EnergyLoss(**kwargs))
@@ -54,16 +55,16 @@ class BaseLoss(nn.Module):
     Base loss class
 
     Parameters:
-        weight (float): The weight for the loss function.
         mode (str): The loss function to use.
             'mse': Mean squared error.
             'mae': Mean absolute error.
             'huber': Huber loss.
+        weight (float): The weight for the loss function. Default: 1.
         transform (str): The transformation to apply to the data. Default: None.
             'cos': 1 - cosine similarity.
             'norm': Norm.
     '''
-    def __init__(self, weight: float, mode: str, transform: str = None, **kwargs):
+    def __init__(self, mode: str, weight: float = 1, transform: str = None, **kwargs):
         super(BaseLoss, self).__init__()
         self.weight = weight
         self.mode = mode
@@ -76,7 +77,9 @@ class BaseLoss(nn.Module):
         else:
             raise ValueError(f'loss mode {mode} not implemented')
         self.transform = transform
-        if self.transform == 'cos':
+        if self.transform is None:
+            pass
+        elif self.transform == 'cos':
             self.cos = nn.CosineSimilarity(dim=-1)
             self.transform_fn = lambda x, y: (self.cos(x, y), torch.ones(x.shape[:-1], device=x.device))
         elif self.transform == 'norm':
