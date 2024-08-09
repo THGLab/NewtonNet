@@ -28,28 +28,27 @@ class Trainer(object):
         script_path (str): The path to the script that was used to start the training.
         settings_path (str): The path to the settings file that was used to start the training.
         resume_training (str): The path to a checkpoint to resume training from. Default: False.
-        checkpoint_log (int): The interval in epochs for logging the training progress. Default: 1.
-        checkpoint_val (int): The interval in epochs for validation. Default: 1.
-        checkpoint_test (int): The interval in epochs for testing. Default: 1.
-        checkpoint_model (int): The interval in epochs for saving the model (must be validated first). Default: 1.
+        check_log (int): The interval in epochs for logging the training progress. Default: 1.
+        check_val (int): The interval in epochs for validation. Default: 1.
+        check_test (int): The interval in epochs for testing. Default: 1.
+        check_model (int): The interval in epochs for saving the model (must be validated first). Default: 1.
         verbose (bool): Whether to print the training progress. Default: False.
         device (torch.device): The device to use for training. Default: cpu
     '''
     def __init__(
             self,
             model: nn.Module,
-            loss_fns: (nn.Module, nn.Module) = None,
+            loss_fns: tuple[nn.Module] = None,
             optimizer: optim.Optimizer = None,
-            lr_warmup: optim.lr_scheduler._LRScheduler = None,
             lr_scheduler: optim.lr_scheduler._LRScheduler = None,
             output_base_path: str = None,
             script_path: str = None,
             settings_path: str = None,
             resume_training: str = None,
-            checkpoint_log: int = 1,
-            checkpoint_val: int = 1,
-            checkpoint_test: int = 1,
-            checkpoint_model: int = 1,
+            check_log: int = 1,
+            check_val: int = 1,
+            check_test: int = 1,
+            check_model: int = 1,
             verbose: bool = False,
             device: torch.device = torch.device('cpu'),
             ):
@@ -58,10 +57,8 @@ class Trainer(object):
         # training parameters
         self.model = model
         self.print_layers()
-        trainable_params = filter(lambda p: p.requires_grad, self.model.parameters())
-        self.main_loss, self.eval_loss = loss_fns or get_loss_by_string()
-        self.optimizer = optimizer or optim.Adam(trainable_params)
-        self.lr_warmup = lr_warmup
+        self.main_loss, self.eval_loss = loss_fns
+        self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
         self.best_val_loss = torch.inf
         self.device = device
@@ -72,30 +69,23 @@ class Trainer(object):
         self.verbose = verbose
 
         # checkpoints
-        self.check_log = checkpoint_log
-        self.check_val = checkpoint_val
-        self.check_test = checkpoint_test
-        self.check_model = checkpoint_model
+        self.check_log = check_log
+        self.check_val = check_val
+        self.check_test = check_test
+        self.check_model = check_model
 
         # checkpoints
         if resume_training is not None:
             checkpoint = torch.load(os.path.join(resume_training, 'models/train_state.tar'))
-            self.epoch = checkpoint['epoch']
+            self.start_epoch = checkpoint['epoch'] + 1
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             self.best_val_loss = checkpoint['best_val_loss']
             self.log = pd.read_csv(os.path.join(resume_training, 'log.csv'))
         else:
-            self.epoch = -1
+            self.start_epoch = 0
             self.log = pd.DataFrame()
-            self.log['epoch'] = None
-            for phase in ('train', 'val', 'test'):
-                self.log[f'{phase}_loss'] = None
-                for loss_fn in self.eval_loss.loss_fns:
-                    self.log[f'{phase}_{loss_fn.name}'] = None
-            self.log['lr'] = None
-            self.log['time'] = None
 
     def make_subdirs(self, output_base_path, script_path, settings_path):
         assert output_base_path is not None, 'output_base_path must be specified'
@@ -137,21 +127,6 @@ class Trainer(object):
         for name, parameter in self.model.named_parameters():
             if not parameter.requires_grad:
                 continue
-            # # shorten names
-            # name = name.replace('node_embedding', 'emb')
-            # name = name.replace('message_passing_layers', 'mes')
-            # name = name.replace('invariant', 'inv')
-            # name = name.replace('equivariant', 'eq')
-            # name = name.replace('message', 'mes')
-            # name = name.replace('coefficient', 'coeff')
-            # name = name.replace('feature', 'feat')
-            # name = name.replace('selfupdate', 'upd')
-            # name = name.replace('property', 'prop')
-            # name = name.replace('prediction', 'pred')
-            # name = name.replace('weight', 'w')
-            # name = name.replace('bias', 'b')
-            # name = name.replace('mean', 'm')
-            # name = name.replace('std', 's')
             if parameter.grad is not None:
                 layers.append(name)
                 grads.append(parameter.grad.detach().abs().mean().cpu())
@@ -171,6 +146,11 @@ class Trainer(object):
         plt.savefig(os.path.join(self.graph_path, f'grad_flow_{epoch}.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
+    def local_log(self, log):
+        log = pd.DataFrame(log)
+        self.log = pd.concat([self.log, log], ignore_index=True)
+        self.log.to_csv(os.path.join(self.output_path, 'log.csv'), index=False)
+
     def train(
             self,
             train_generator,
@@ -182,36 +162,13 @@ class Trainer(object):
         
         self.model.to(self.device[0])
         if self.multi_gpu:
-            self.model = nn.DataParallel(self.model, device_ids=self.device)
-
-        # for epoch in range(1):
-        #     self.model.train()
-        #     optimizer = SGD([param for name, param in self.model.named_parameters() if 'scaler' in name], lr=1.0)
-        #     for train_batch in train_generator:
-        #         optimizer.zero_grad()
-        #         preds = self.model(train_batch.z, train_batch.pos, train_batch.edge_index, train_batch.batch)
-        #         loss = self.main_loss(preds, train_batch)
-        #         loss.backward()
-        #         optimizer.step()
-        # print(self.model)
-                
+            self.model = nn.DataParallel(self.model, device_ids=self.device)                
 
         step = 0
-        for epoch in tqdm(range(epochs + 1)):
-            # # skip epochs if resuming training
-            # if epoch <= self.epoch:
-            #     for train_step, train_batch in enumerate(train_generator):
-            #         pass
-            #     if epoch % self.check_val == 0:
-            #         for val_step, val_batch in enumerate(val_generator):
-            #             pass
-            #     if epoch % self.check_test == 0:
-            #         for test_step, test_batch in enumerate(test_generator):
-            #             pass
-            #     continue
-
+        for epoch in tqdm(range(self.start_epoch, epochs + 1)):
             # training
             self.model.train()
+            train_log = {}
 
             for train_batch in train_generator:
                 self.optimizer.zero_grad()
@@ -223,80 +180,70 @@ class Trainer(object):
                 self.optimizer.step()
                 main_loss = main_loss.detach().item()
                 wandb.log({'epoch': epoch, 'step': step, 'train_loss': main_loss, 'lr': self.optimizer.param_groups[0]['lr']})
+                train_log['train_loss'] = train_log.get('train_loss', 0.0) + main_loss
                 step += 1
-
-            # plots
-            if epoch % self.check_log == 0:
-                self.plot_grad_flow(epoch)
+            train_log['train_loss'] /= len(train_generator)
 
             # validation
             if epoch % self.check_val == 0:
                 self.model.eval()
-                val_losses = {}
+                val_log = {}
 
                 for val_batch in val_generator:
                     preds = self.model(val_batch.z, val_batch.pos, val_batch.edge_index, val_batch.batch)
                     main_loss = self.main_loss(preds, val_batch)
-                    val_losses['val_loss'] = val_losses.get('val_loss', 0.0) + main_loss.detach().item()
+                    val_log['val_loss'] = val_log.get('val_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, val_batch)
                     for key, value in eval_loss.items():
-                        val_losses[f'val_{key}'] = val_losses.get(f'val_{key}', 0.0) + value.detach().item()
+                        val_log[f'val_{key}'] = val_log.get(f'val_{key}', 0.0) + value.detach().item()
 
-                for key, value in val_losses.items():
-                    val_losses[key] /= len(val_generator)
-                wandb.log({'epoch': epoch, 'step': step} | val_losses)
+                for key, value in val_log.items():
+                    val_log[key] /= len(val_generator)
+                wandb.log({'epoch': epoch, 'step': step} | val_log)
 
-                # best model
-                if epoch % self.check_model == 0:
-                    if val_losses['val_loss'] < self.best_val_loss:
-                        self.best_val_loss = val_losses['val_loss']
-                        if self.multi_gpu:
-                            save_model = self.model.module
-                        else:
-                            save_model = self.model
-                        torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
+            # best model
+            if epoch % self.check_model == 0:
+                if val_log['val_loss'] < self.best_val_loss:
+                    self.best_val_loss = val_log['val_loss']
+                    if self.multi_gpu:
+                        save_model = self.model.module
+                    else:
+                        save_model = self.model
+                    torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
 
             # learning rate decay
-            if isinstance(self.lr_warmup, LRScheduler):
-                self.lr_warmup.step()
             if isinstance(self.lr_scheduler, ReduceLROnPlateau):
-                self.lr_scheduler.step(val_losses['val_loss'])
+                self.lr_scheduler.step(val_log['val_loss'])
             elif isinstance(self.lr_scheduler, LRScheduler):
                 self.lr_scheduler.step()
 
             # save test predictions
-            test_losses = {}
+            test_log = {}
             if epoch % self.check_test == 0:
                 self.model.eval()
 
                 for test_batch in test_generator:
                     preds = self.model(test_batch.z, test_batch.pos, test_batch.edge_index, test_batch.batch)
                     main_loss = self.main_loss(preds, test_batch)
-                    test_losses['test_loss'] = test_losses.get('test_loss', 0.0) + main_loss.detach().item()
+                    test_log['test_loss'] = test_log.get('test_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, test_batch)
                     for key, value in eval_loss.items():
-                        test_losses[f'test_{key}'] = test_losses.get(f'test_{key}' + key, 0.0) + value.detach().item()
+                        test_log[f'test_{key}'] = test_log.get(f'test_{key}' + key, 0.0) + value.detach().item()
 
-                for key, value in test_losses.items():
-                    test_losses[key] /= len(test_generator)
-                wandb.log({'epoch': epoch, 'step': step} | test_losses)
+                for key, value in test_log.items():
+                    test_log[key] /= len(test_generator)
+                wandb.log({'epoch': epoch, 'step': step} | test_log)
+
+            # plots
+            if epoch % self.check_log == 0:
+                self.plot_grad_flow(epoch)
+                self.local_log({**train_log, **val_log, **test_log})
 
             # # loss force weight decay
             # self.main_loss.force_loss_decay()
 
             # checkpoint
             if epoch % self.check_log == 0:
-                # checkpoint = {}
-                # checkpoint.update({'epoch': epoch})
-                # checkpoint.update({f'train_{key}': value for key, value in train_losses.items()})
-                # checkpoint.update({f'val_{key}': value for key, value in val_losses.items()})
-                # checkpoint.update({f'test_{key}': value for key, value in test_losses.items()})
-                # checkpoint.update({'lr': self.optimizer.param_groups[0]['lr']})
-                # checkpoint.update({'time': time.time() - t0})
-                # self.log.loc[epoch] = checkpoint
-                # self.log.to_csv(os.path.join(self.output_path, 'log.csv'), index=False)
-                # print(f'[{epoch}/{epochs}]', end=' ')
-                # print(*[f'{key}: {value:.5f}' for key, value in checkpoint.items() if key != 'epoch'], sep=' - ')
                 torch.save({
                         'epoch': epoch,
                         'model_state_dict': self.model.state_dict(),

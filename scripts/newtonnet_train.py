@@ -106,20 +106,14 @@ trainer = Trainer(
     output_base_path=output_base_path,
     script_path=script_path,
     settings_path=settings_path,
-    resume_training=settings['checkpoint'].get('resume_training', None),
-    checkpoint_log=settings['checkpoint'].get('log', 1),
-    checkpoint_val=settings['checkpoint'].get('val', 1),
-    checkpoint_test=settings['checkpoint'].get('test', 1),
-    checkpoint_model=settings['checkpoint'].get('model', 1),
-    verbose=settings['checkpoint'].get('verbose', False),
     device=device,
+    **settings['checkpoint'],
     )
 trainer.train(
     train_generator=train_gen,
     val_generator=val_gen,
     test_generator=test_gen,
-    epochs=settings['training'].get('epochs', 100),
-    clip_grad=settings['training'].get('clip_grad', 0.0),
+    **settings['training'],
     )
 
 print('done!')

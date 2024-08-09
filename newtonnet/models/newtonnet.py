@@ -54,8 +54,8 @@ class NewtonNet(nn.Module):
         for key in infer_properties:
             output_layer = get_output_by_string(key, n_features, activation, scalers)
             self.output_layers.append(output_layer)
-            # if isinstance(output_layer, FirstDerivativeProperty):
-            #     self.embedding_layer.requires_dr = True
+            if isinstance(output_layer, FirstDerivativeProperty):
+                self.embedding_layer.requires_dr = True
             # if isinstance(output_layer, SecondDerivativeProperty):
             #     dependent_property = output_layer.dependent_property
             #     assert dependent_property in self.output_layers.keys(), f'cannot find dependent property {dependent_property}'
@@ -131,7 +131,7 @@ class EmbeddingNet(nn.Module):
         # recompute distances and distance vectors
         if self.requires_dr:
             pos.requires_grad_()
-            disp_edge = pos[edge_index[0]] - pos[edge_index[1]]  # n_edges, 3
+        disp_edge = pos[edge_index[0]] - pos[edge_index[1]]  # n_edges, 3
 
         # initialize edge representations
         dist_edge, dir_edge = self.norm(disp_edge)  # n_edges, 1; n_edges, 3
