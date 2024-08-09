@@ -1,5 +1,5 @@
 from torch.optim import Adam, SGD, RMSprop, AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, OneCycleLR, LinearLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, OneCycleLR, LinearLR, ChainedScheduler
 
 
 def get_optimizer_by_string(optimizer_name, parameters, **kwargs):
@@ -35,19 +35,16 @@ def get_optimizer_by_string(optimizer_name, parameters, **kwargs):
     return optimizer
 
 
-def get_scheduler_by_string(scheduler_name, optimizer, **kwargs):
+def get_scheduler_by_string(scheduler_list, optimizer):
     """Get scheduler by string.
 
     Parameters
     ----------
-    scheduler_name: str
-        Name of the scheduler.
+    scheduler_list: list[(str, dict)]
+        List of scheduler names and keyword arguments.
 
     optimizer: torch.optim.Optimizer
         Optimizer.
-
-    kwargs: dict
-        Keyword arguments.
 
     Returns
     -------
@@ -55,16 +52,21 @@ def get_scheduler_by_string(scheduler_name, optimizer, **kwargs):
         Scheduler.
 
     """
-    if scheduler_name == 'plateau':
-        scheduler = ReduceLROnPlateau(optimizer, **kwargs)
-    elif scheduler_name == 'lambda':
-        scheduler = LambdaLR(optimizer, **kwargs)
-    elif scheduler_name == 'onecycle':
-        scheduler = OneCycleLR(optimizer, **kwargs)
-    elif scheduler_name == 'linear':
-        scheduler = LinearLR(optimizer, **kwargs)
-    elif scheduler_name is None:
-        scheduler = None
+    if scheduler_list is None:
+        return None
+    scheduler = []
+    for scheduler_name, scheduler_kwargs in scheduler_list:
+        if scheduler_name == 'plateau':
+            scheduler.append(ReduceLROnPlateau(optimizer, **scheduler_kwargs))
+        elif scheduler_name == 'lambda':
+            scheduler.append(LambdaLR(optimizer, **scheduler_kwargs))
+        elif scheduler_name == 'onecycle':
+            scheduler.append(OneCycleLR(optimizer, **scheduler_kwargs))
+        elif scheduler_name == 'linear':
+            scheduler.append(LinearLR(optimizer, **scheduler_kwargs))
+        else:
+            raise ValueError(f'scheduler {scheduler_name} is not supported')
+    if len(scheduler) == 1:
+        return scheduler[0]
     else:
-        raise ValueError(f'scheduler {scheduler_name} is not supported')
-    return scheduler
+        return ChainedScheduler(scheduler)

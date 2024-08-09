@@ -61,8 +61,8 @@ torch.manual_seed(settings['general']['seed'])
 # transform = None
 transform = ToDevice(device[0])
 train_gen, val_gen, test_gen, stats = parse_train_test(
-    **settings['data'],
     transform=transform,
+    **settings['data'],
     )
 
 # model
@@ -88,30 +88,20 @@ main_loss, eval_loss = get_loss_by_string(settings['training'].pop('loss', None)
 
 # optimizer
 trainable_params = filter(lambda p: p.requires_grad, model.parameters())
-optimizer = get_optimizer_by_string(
-    settings['training'].get('optimizer', 'adam'),
-    trainable_params,
-    **settings['training'].get('optimizer_kwargs', {}),
-    )
-lr_warmup = get_scheduler_by_string(
-    settings['training'].get('lr_warmup', None),
-    optimizer,
-    **settings['training'].get('lr_warmup_kwargs', {}),
-    )
-lr_scheduler = get_scheduler_by_string(
-    settings['training'].get('lr_scheduler', None),
-    optimizer,
-    **settings['training'].get('lr_scheduler_kwargs', {}),
-    )
+optimizer, optimizer_kwargs = settings['training'].pop('optimizer', {'adam': {}}).popitem()
+optimizer = get_optimizer_by_string(optimizer, trainable_params, **optimizer_kwargs)
+lr_scheduler = settings['training'].pop('lr_scheduler', None).items()
+lr_scheduler = get_scheduler_by_string(lr_scheduler, optimizer)
 
 # training
-wandb.login()
-wandb.init(**settings['training'].get('wandb_kwargs', {}), config=settings)
+wandb_kwargs = settings['training'].pop('wandb', None)
+if wandb_kwargs is not None:
+    wandb.login()
+    wandb.init(**wandb_kwargs, config=settings)
 trainer = Trainer(
     model=model,
     loss_fns=(main_loss, eval_loss),
     optimizer=optimizer,
-    lr_warmup=lr_warmup,
     lr_scheduler=lr_scheduler,
     output_base_path=output_base_path,
     script_path=script_path,
