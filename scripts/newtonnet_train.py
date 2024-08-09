@@ -17,7 +17,6 @@ from newtonnet.data import RadiusGraph
 from newtonnet.data import parse_train_test
 from newtonnet.layers.precision import get_precison_by_string
 from newtonnet.layers.activations import get_activation_by_string
-from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.layers.representations import get_representation_by_string
 from newtonnet.layers.scalers import get_scaler_by_string
 from newtonnet.train.loss import get_loss_by_string
@@ -79,9 +78,10 @@ else:
     model = NewtonNet(
         representations=represenations,
         scalers=scalers,
-        device=device[0],
         **settings['model'],
         )
+    model.to(device[0])
+    model.to(precision)
 
 # loss
 main_loss, eval_loss = get_loss_by_string(

@@ -7,6 +7,8 @@ from torch import nn
 def get_activation_by_string(key):
     if key == 'swish':
         activation = nn.SiLU()
+    elif key == 'silu':
+        activation = nn.SiLU()
     elif key == 'relu':
         activation = nn.ReLU()
     elif key == 'elu':
