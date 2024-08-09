@@ -67,19 +67,9 @@ train_gen, val_gen, test_gen, stats = parse_train_test(
 
 # model
 scalers = {key: get_scaler_by_string(key, z=stats['z'], **stat) for key, stat in stats['properties'].items()}
-distance_network = nn.ModuleDict({
-    'scale': get_cutoff_by_string(
-        'scale',
-        cutoff=stats['cutoff'],
-        ),
-    'cutoff': get_cutoff_by_string(
-        settings['model'].get('cutoff_network', 'poly'), 
-        ),
-    'representation': get_representation_by_string(
-        settings['model'].get('representation', 'bessel'), 
-        n_basis=settings['model'].get('n_basis', 20),
-        ),
-    })
+represenations = get_representation_by_string(cutoff=stats['cutoff'], **settings['model'].get('representation_kwargs', {}))
+print(represenations)
+raise NotImplementedError
 if settings['model'].get('pretrained_model', None) is not None:
     model = torch.load(
         settings['model']['pretrained_model'], 
