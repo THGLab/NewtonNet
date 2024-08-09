@@ -2,9 +2,8 @@ import torch
 from torch import nn
 from torch_geometric.utils import scatter
 
+from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.scalers import NullScaleShift
-from newtonnet.layers.shells import ShellProvider
-from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.layers.representations import get_representation_by_string
 from newtonnet.models.output import get_output_by_string, CustomOutputs, FirstDerivativeProperty, SecondDerivativeProperty
 
@@ -15,38 +14,30 @@ class NewtonNet(nn.Module):
 
     Parameters:
         n_features (int): Number of features in the latent layer. Default: 128.
-        n_basis (int): Number of radial basis functions for edge description. Default: 20.
-        distance_network (nn.Module): The distance transformation function.
+        representations (nn.Module): The distance transformation function.
         n_interactions (int): Number of message passing layers. Default: 3.
         activation (nn.Module): Activation function. Default: nn.SiLU().
         infer_properties (list): The properties to predict. Default: [].
         scalers (nn.ModuleDict): The scalers for the atomic properties. Default: {}.
         train_scalers (bool): Whether the normalizers are trainable. Default: False.
-        device (torch.device): The device to run the network. Default: torch.device('cpu').
     '''
     def __init__(
             self,
             n_features: int = 128,
-            distance_network: nn.Module = None,
             n_interactions: int = 3,
-            activation: nn.Module = nn.SiLU(),
+            activation: str = 'swish',
             infer_properties: list = [],
-            scalers: nn.ModuleDict = {},
+            representations: nn.Module = None,
+            scalers: dict = None,
     ) -> None:
 
         super(NewtonNet, self).__init__()
 
         # embedding layer
-        if distance_network is None:
-            distance_network = nn.ModuleDict({
-                'scale': get_cutoff_by_string('scale'),
-                'cutoff': get_cutoff_by_string('poly'), 
-                'representation': get_representation_by_string('bessel'),
-                })
         self.embedding_layer = EmbeddingNet(
             n_features=n_features,
             z_max=max([scaler.z_max for scaler in scalers.values()]) if scalers else 128,
-            distance_network=distance_network,
+            representations=representations,
             )
 
         # message passing
@@ -54,7 +45,7 @@ class NewtonNet(nn.Module):
             InteractionNet(
                 n_features=n_features,
                 n_basis=self.embedding_layer.n_basis,
-                activation=activation,
+                activation=get_activation_by_string(activation),
                 ) for _ in range(n_interactions)
             ])
 
@@ -111,9 +102,11 @@ class EmbeddingNet(nn.Module):
     Parameters:
         n_features (int): Number of features in the hidden layer.
         z_max (int): Maximum atomic number.
-        distance_network (nn.Module): The distance transformation function.
+        representations (nn.Module): The distance transformation function.
+        device (torch.device): The device to run the network.
+        precision (torch.dtype): The precision of the network.
     '''
-    def __init__(self, n_features, z_max, distance_network):
+    def __init__(self, n_features, z_max, representations, device, precision):
 
         super(EmbeddingNet, self).__init__()
 
@@ -122,9 +115,9 @@ class EmbeddingNet(nn.Module):
         self.node_embedding = nn.Embedding(z_max + 1, n_features)
 
         # edge embedding
-        self.norm = distance_network['scale']
-        self.cutoff = distance_network['cutoff']
-        self.edge_embedding = distance_network['representation']
+        self.norm = representations['scale']
+        self.cutoff = representations['cutoff']
+        self.edge_embedding = representations['representation']
         self.n_basis = self.edge_embedding.n_basis
 
         # requires dr
