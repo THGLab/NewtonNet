@@ -15,7 +15,7 @@ from newtonnet.models import NewtonNet
 from newtonnet.train import Trainer
 from newtonnet.data import RadiusGraph
 from newtonnet.data import parse_train_test
-from newtonnet.layers.precision import set_precison_by_string
+from newtonnet.layers.precision import get_precison_by_string
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.layers.representations import get_representation_by_string
@@ -47,22 +47,23 @@ script_path = os.path.abspath(__file__)
 output_base_path = settings['general']['output']
 
 # device
-precision = set_precison_by_string(settings['general'].get('precision', 'float32'))
-if type(settings['general'].get('device', 'cpu')) is list:
+precision = get_precison_by_string(settings['general']['precision'])
+if type(settings['general']['device']) is list:
     device = [torch.device(item) for item in settings['general']['device']]
 else:
     device = [torch.device(settings['general']['device'])]
 
 # data
-torch.manual_seed(settings['data'].get('random_states', 42))
-pre_transform = Compose([
-    RadiusGraph(settings['data'].get('cutoff', 5.0)),
-    ToDevice(device[0]),
-    ])
-transform = None
-# pre_transform = RadiusGraph(settings['data'].get('cutoff', 5.0))
-# transform = ToDevice(device[0])
+torch.manual_seed(settings['general']['seed'])
+# pre_transform = Compose([
+#     RadiusGraph(settings['data'].get('cutoff', 5.0)),
+#     ToDevice(device[0]),
+#     ])
+# transform = None
+pre_transform = RadiusGraph(settings['data'].get('cutoff', 5.0))
+transform = ToDevice(device[0])
 train_gen, val_gen, test_gen, stats = parse_train_test(
+    # **settings['data'],
     train_root=settings['data'].get('train_root', None),
     val_root=settings['data'].get('val_root', None),
     test_root=settings['data'].get('test_root', None),
@@ -83,8 +84,8 @@ scalers = {}
 for key in settings['data'].get('train_properties', ['energy', 'forces']):
     scalers[key] = get_scaler_by_string(key, stats)
 distance_network = nn.ModuleDict({
-    'scalednorm': get_cutoff_by_string(
-        'scalednorm',
+    'scale': get_cutoff_by_string(
+        'scale',
         cutoff=pre_transform.transforms[0].r,
         # cutoff=pre_transform.r,
         ),

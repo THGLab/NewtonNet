@@ -1,17 +1,14 @@
 import torch
 
-def set_precison_by_string(key):
+def get_precison_by_string(key):
     '''
-    Set the default precision of torch tensors.
-    
-    Args:
-        precision (str): The precision to be used. Can be 'single' or 'double'.
+    Get the precision for data and model.
     '''
-    if key == 'single':
-        torch.set_default_dtype(torch.float32)
+    if key in ['float32', 'float', 'single']:
         return torch.float32
-    elif key == 'double':
-        torch.set_default_dtype(torch.float64)
+    elif key in ['float64', 'double']:
         return torch.float64
+    elif key in ['float16', 'half']:
+        return torch.float16
     else:
         raise ValueError(f'precision {key} is not supported')

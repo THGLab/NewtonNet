@@ -6,10 +6,9 @@ import torch
 from torch import nn
 from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
-from torch_geometric.transforms import RadiusGraph
+# from torch_geometric.transforms import RadiusGraph
 
 from newtonnet.data import MolecularDataset
-# from newtonnet.data import RadiusGraph
 
 
 def parse_train_test(
@@ -22,10 +21,7 @@ def parse_train_test(
         train_batch_size: int = 32,
         val_batch_size: int = 32,
         test_batch_size: int = 32,
-        transform: callable = None,
-        pre_transform: callable = RadiusGraph(r=5.0, max_num_neighbors=1024),
-        pre_filter: callable = None,
-        force_reload: bool = False,
+        **dataset_kwargs,
         ):
     '''
     Parse the training, validation, and test data.
@@ -40,7 +36,6 @@ def parse_train_test(
         train_batch_size (int): The batch size for training. Default: 32.
         val_batch_size (int): The batch size for validation. Default: 32.
         test_batch_size (int): The batch size for testing. Default: 32.
-        train_properties (list): The properties to be trained. Default: ['energy', 'forces'].
         transform (callable): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before every access. Default: None.
         pre_transform (callable): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before being saved to disk. Default: None.
         pre_filter (callable): A function that takes in a data object and returns a boolean value, indicating whether the data object should be included in the final dataset. Default: None.
@@ -55,21 +50,21 @@ def parse_train_test(
     # load data
     print('Data:')
     if train_root is not None:
-        train_data = MolecularDataset(root=train_root, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
+        train_data = MolecularDataset(root=train_root, **dataset_kwargs)
         print(f'load {len(train_data)} data from {train_root}')
     else:
         raise ValueError('train_root must be provided')
     train_size = len(train_data) if train_size is None else train_size
     train_data, left_data = random_split(train_data, [train_size, len(train_data) - train_size])
     if val_root is not None:
-        val_data = MolecularDataset(root=val_root, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
+        val_data = MolecularDataset(root=val_root, **dataset_kwargs)
         print(f'load {len(val_data)} data from {val_root}')
     else:
         val_data = left_data
     val_size = len(val_data) if val_size is None else val_size
     val_data, left_data = random_split(val_data, [val_size, len(val_data) - val_size])
     if test_root is not None:
-        test_data = MolecularDataset(root=test_root, transform=transform, pre_transform=pre_transform, pre_filter=pre_filter, force_reload=force_reload)
+        test_data = MolecularDataset(root=test_root, **dataset_kwargs)
         print(f'load {len(test_data)} data from {test_root}')
     else:
         test_data = left_data
