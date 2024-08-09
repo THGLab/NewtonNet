@@ -6,7 +6,7 @@ from newtonnet.layers.scalers import NullScaleShift
 from newtonnet.layers.shells import ShellProvider
 from newtonnet.layers.cutoff import get_cutoff_by_string
 from newtonnet.layers.representations import get_representation_by_string
-from newtonnet.models.output import get_output_by_string, FirstDerivativeProperty, SecondDerivativeProperty
+from newtonnet.models.output import get_output_by_string, CustomOutputs, FirstDerivativeProperty, SecondDerivativeProperty
 
 
 class NewtonNet(nn.Module):
@@ -32,7 +32,6 @@ class NewtonNet(nn.Module):
             activation: nn.Module = nn.SiLU(),
             infer_properties: list = [],
             scalers: nn.ModuleDict = {},
-            device: torch.device = torch.device('cpu'),
     ) -> None:
 
         super(NewtonNet, self).__init__()
@@ -40,7 +39,7 @@ class NewtonNet(nn.Module):
         # embedding layer
         if distance_network is None:
             distance_network = nn.ModuleDict({
-                'scalednorm': get_cutoff_by_string('scalednorm'),
+                'scale': get_cutoff_by_string('scale'),
                 'cutoff': get_cutoff_by_string('poly'), 
                 'representation': get_representation_by_string('bessel'),
                 })
@@ -62,18 +61,17 @@ class NewtonNet(nn.Module):
         # final output layer
         self.output_layers = nn.ModuleList()
         for key in infer_properties:
-            scaler = scalers[key] if key in scalers else NullScaleShift()
-            output_layer = get_output_by_string(key=key, scaler=scaler, n_features=n_features, activation=activation)
+            output_layer = get_output_by_string(key, self, scalers)
             self.output_layers.append(output_layer)
-            if isinstance(output_layer, FirstDerivativeProperty):
-                self.embedding_layer.requires_dr = True
+            # if isinstance(output_layer, FirstDerivativeProperty):
+            #     self.embedding_layer.requires_dr = True
             # if isinstance(output_layer, SecondDerivativeProperty):
             #     dependent_property = output_layer.dependent_property
             #     assert dependent_property in self.output_layers.keys(), f'cannot find dependent property {dependent_property}'
             #     self.output_layers[dependent_property].requires_dr = True
         
         # device
-        self.to(device)
+        # self.to(device)
 
     def forward(self, z, pos, edge_index, batch):
         '''
@@ -98,28 +96,13 @@ class NewtonNet(nn.Module):
             # atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge, edge_index)
 
         # output net
-        # outputs = {
-        #     'z': z,
-        #     'pos': pos,
-        #     'batch': batch,
-        #     'atom_node': atom_node,
-        #     'force_node': force_node,
-        #     }
-        outputs = CustomDataset()
-        outputs.z = z
-        outputs.pos = pos
-        outputs.batch = batch
-        outputs.atom_node = atom_node
-        outputs.force_node = force_node
+        outputs = CustomOutputs(z, pos, batch, atom_node, force_node)
         for output_layer in self.output_layers:
-            key = output_layer.key
-            output = output_layer(outputs)
-            outputs.__setattr__(key, output)
+            outputs = output_layer(outputs)
 
         return outputs
 
-class CustomDataset:
-    pass  
+
 
 class EmbeddingNet(nn.Module):
     '''
@@ -139,7 +122,7 @@ class EmbeddingNet(nn.Module):
         self.node_embedding = nn.Embedding(z_max + 1, n_features)
 
         # edge embedding
-        self.norm = distance_network['scalednorm']
+        self.norm = distance_network['scale']
         self.cutoff = distance_network['cutoff']
         self.edge_embedding = distance_network['representation']
         self.n_basis = self.edge_embedding.n_basis
