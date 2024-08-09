@@ -7,7 +7,7 @@ class RadiusGraph(BaseTransform):
     within a given distance (functional name: :obj:`radius_graph`).
 
     Args:
-        r (float): The distance. (default: :obj:`5.0`)
+        r (float): The distance.
         loop (bool, optional): If :obj:`True`, the graph will contain
             self-loops. (default: :obj:`False`)
         max_num_neighbors (int, optional): The maximum number of neighbors to
@@ -22,7 +22,7 @@ class RadiusGraph(BaseTransform):
     """
     def __init__(
         self,
-        r: float = 5.0,
+        r: float,
         loop: bool = False,
         max_num_neighbors: int = 1024,
         flow: str = 'source_to_target',

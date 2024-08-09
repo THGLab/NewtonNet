@@ -19,7 +19,7 @@ class MolecularDataset(InMemoryDataset):
     Args:
         root (str): The root directory where the dataset should be saved.
         transform (callable, optional): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before every access. Default: None.
-        pre_transform (callable, optional): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before being saved to disk. Default: RadiusGraph().
+        pre_transform (callable, optional): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before being saved to disk. Default: None.
         pre_filter (callable, optional): A function that takes in a data object and returns a boolean value, indicating whether the data object should be included in the final dataset. Default: None.
         force_reload (bool): Whether to re-process the dataset. Default: False.
         precision (torch.dtype): The precision of the data. Default: torch.float.
@@ -28,11 +28,14 @@ class MolecularDataset(InMemoryDataset):
         self,
         root: str,
         transform: Optional[Callable] = None,
-        pre_transform: Optional[Callable] = RadiusGraph(),
+        pre_transform: Optional[Callable] = None,
         pre_filter: Optional[Callable] = None,
         force_reload: bool = False,
+        cutoff: float = 5.0,
         precision: torch.dtype = torch.float,
     ) -> None:
+        if pre_transform is None:
+            pre_transform = RadiusGraph(cutoff)
         self.precision = precision
         super().__init__(root, transform, pre_transform, pre_filter,
                          force_reload=force_reload)
@@ -87,14 +90,18 @@ class MolecularDataset(InMemoryDataset):
     def save_stats(self, data_list: List[Data], stats_path: str) -> None:
         z_list, formula_list = [], []
         energy_list, force_list = [], []
+        node_count, edge_count = 0, 0
         for data in data_list:
             z_list.append(data.z)
             formula_list.append(torch.bincount(data.z))
             energy_list.append(data.energy)
             force_list.append(data.force.norm(dim=-1))
+            node_count += data.z.size(0)
+            edge_count += data.edge_index.size(1)
 
         z = torch.cat(z_list, dim=0).long().cpu()
         formula = torch.stack(formula_list, dim=0).float().cpu()
+        neighbor_count = edge_count / node_count
         energy = torch.cat(energy_list, dim=0).cpu()
         force = torch.cat(force_list, dim=0).cpu()
         energy_shifts = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
@@ -106,7 +113,21 @@ class MolecularDataset(InMemoryDataset):
         with open(stats_path, 'w') as f:
             z, energy_shift = dense_to_sparse(energy_shifts.unsqueeze(-1))
             _, force_scale = dense_to_sparse(force_scale.unsqueeze(-1))
-            json.dump({'z': z[0].tolist(), 'energy_shift': energy_shift.tolist(), 'energy_scale': energy_scale.item(), 'force_scale': force_scale.tolist()}, f)
+            json.dump(
+                {
+                    'z': z[0].tolist(), 
+                    'average_neighbor_count': neighbor_count,
+                    'cutoff': self.pre_transform.r,
+                    'properties': {
+                        'energy': {
+                            'shift': energy_shift.tolist(), 
+                            'scale': energy_scale.item(),
+                        },
+                        'force': {
+                            'scale': force_scale.tolist(),
+                        },
+                    },
+                }, f)
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}({len(self)})'

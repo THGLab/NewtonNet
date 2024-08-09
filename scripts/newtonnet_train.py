@@ -60,34 +60,17 @@ torch.manual_seed(settings['general']['seed'])
 #     ToDevice(device[0]),
 #     ])
 # transform = None
-pre_transform = RadiusGraph(settings['data'].get('cutoff', 5.0))
-transform = ToDevice(device[0])
 train_gen, val_gen, test_gen, stats = parse_train_test(
-    # **settings['data'],
-    train_root=settings['data'].get('train_root', None),
-    val_root=settings['data'].get('val_root', None),
-    test_root=settings['data'].get('test_root', None),
-    # train_properties=settings['data'].get('train_properties', ['energy', 'forces']),
-    pre_transform=pre_transform,
-    transform=transform,
-    force_reload=settings['data'].get('force_reload', False),
-    train_size=settings['data'].get('train_size', None),
-    val_size=settings['data'].get('val_size', None),
-    test_size=settings['data'].get('test_size', None),
-    train_batch_size=settings['training'].get('train_batch_size', 32),
-    val_batch_size=settings['training'].get('val_batch_size', 32),
-    test_batch_size=settings['training'].get('test_batch_size', 32),
+    **settings['data'],
+    transform=ToDevice(device[0]),
     )
 
 # model
-scalers = {}
-for key in settings['data'].get('train_properties', ['energy', 'forces']):
-    scalers[key] = get_scaler_by_string(key, stats)
+scalers = {key: get_scaler_by_string(key, z=stats['z'], **stat) for key, stat in stats['properties'].items()}
 distance_network = nn.ModuleDict({
     'scale': get_cutoff_by_string(
         'scale',
-        cutoff=pre_transform.transforms[0].r,
-        # cutoff=pre_transform.r,
+        cutoff=stats['cutoff'],
         ),
     'cutoff': get_cutoff_by_string(
         settings['model'].get('cutoff_network', 'poly'), 
