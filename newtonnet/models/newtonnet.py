@@ -14,12 +14,11 @@ class NewtonNet(nn.Module):
 
     Parameters:
         n_features (int): Number of features in the latent layer. Default: 128.
-        representations (nn.Module): The distance transformation function.
         n_interactions (int): Number of message passing layers. Default: 3.
-        activation (nn.Module): Activation function. Default: nn.SiLU().
+        activation (str): Activation function. Default: 'swish'.
         infer_properties (list): The properties to predict. Default: [].
-        scalers (nn.ModuleDict): The scalers for the atomic properties. Default: {}.
-        train_scalers (bool): Whether the normalizers are trainable. Default: False.
+        representations (dict): The distance transformation functions.
+        scalers (nn.ModuleDict): The scalers for the chemical properties. Default: None.
     '''
     def __init__(
             self,
@@ -32,6 +31,7 @@ class NewtonNet(nn.Module):
     ) -> None:
 
         super(NewtonNet, self).__init__()
+        activation = get_activation_by_string(activation)
 
         # embedding layer
         self.embedding_layer = EmbeddingNet(
@@ -45,14 +45,14 @@ class NewtonNet(nn.Module):
             InteractionNet(
                 n_features=n_features,
                 n_basis=self.embedding_layer.n_basis,
-                activation=get_activation_by_string(activation),
+                activation=activation,
                 ) for _ in range(n_interactions)
             ])
 
         # final output layer
         self.output_layers = nn.ModuleList()
         for key in infer_properties:
-            output_layer = get_output_by_string(key, self, scalers)
+            output_layer = get_output_by_string(key, n_features, activation, scalers)
             self.output_layers.append(output_layer)
             # if isinstance(output_layer, FirstDerivativeProperty):
             #     self.embedding_layer.requires_dr = True
@@ -102,11 +102,9 @@ class EmbeddingNet(nn.Module):
     Parameters:
         n_features (int): Number of features in the hidden layer.
         z_max (int): Maximum atomic number.
-        representations (nn.Module): The distance transformation function.
-        device (torch.device): The device to run the network.
-        precision (torch.dtype): The precision of the network.
+        representations (dict): The distance transformation functions.
     '''
-    def __init__(self, n_features, z_max, representations, device, precision):
+    def __init__(self, n_features, z_max, representations):
 
         super(EmbeddingNet, self).__init__()
 
@@ -117,7 +115,7 @@ class EmbeddingNet(nn.Module):
         # edge embedding
         self.norm = representations['scale']
         self.cutoff = representations['cutoff']
-        self.edge_embedding = representations['representation']
+        self.edge_embedding = representations['radial']
         self.n_basis = self.edge_embedding.n_basis
 
         # requires dr

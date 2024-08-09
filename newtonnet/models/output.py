@@ -4,9 +4,9 @@ from torch.autograd import grad
 from torch_geometric.utils import scatter
 
 
-def get_output_by_string(key, model, scalers):
+def get_output_by_string(key, n_features, activation, scalers):
     if key == 'energy':
-        output_layer = EnergyOutput(model.n_features, model.activation, scalers['energy'])
+        output_layer = EnergyOutput(n_features, activation, scalers['energy'])
     elif key == 'gradient_force':
         output_layer = GradientForceOutput()
     elif key == 'direct_force':
