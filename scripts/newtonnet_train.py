@@ -60,30 +60,27 @@ torch.manual_seed(settings['general']['seed'])
 #     ToDevice(device[0]),
 #     ])
 # transform = None
+transform = ToDevice(device[0])
 train_gen, val_gen, test_gen, stats = parse_train_test(
     **settings['data'],
-    transform=ToDevice(device[0]),
+    transform=transform,
     )
 
 # model
 scalers = {key: get_scaler_by_string(key, z=stats['z'], **stat) for key, stat in stats['properties'].items()}
-represenations = get_representation_by_string(cutoff=stats['cutoff'], **settings['model'].get('representation_kwargs', {}))
-print(represenations)
-raise NotImplementedError
-if settings['model'].get('pretrained_model', None) is not None:
-    model = torch.load(
-        settings['model']['pretrained_model'], 
-        map_location=device[0],
-        )
+represenations = get_representation_by_string(
+    cutoff=stats['cutoff'], 
+    **settings['model'].pop('representation', {}),
+    )
+pretrained_model = settings['model'].pop('pretrained_model', None)
+if pretrained_model is not None:
+    model = torch.load(pretrained_model, map_location=device[0])
 else:
     model = NewtonNet(
-        n_features=settings['model'].get('n_features', 128),
-        distance_network=distance_network,
-        n_interactions=settings['model'].get('n_interactions', 3),
-        infer_properties=settings['model'].get('infer_properties', ['energy', 'forces']),
-        activation=get_activation_by_string(settings['model'].get('activation', 'swish')),
+        representations=represenations,
         scalers=scalers,
         device=device[0],
+        **settings['model'],
         )
 
 # loss
