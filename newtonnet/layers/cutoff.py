@@ -5,7 +5,7 @@ from torch import nn
 
 
 def get_cutoff_by_string(key, **kwargs):
-    if key == 'scalednorm':
+    if key == 'scale':
         cutoff = ScaledNorm(**kwargs)
     elif key == 'poly':
         cutoff = PolynomialCutoff(**kwargs)
