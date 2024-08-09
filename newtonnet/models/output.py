@@ -4,11 +4,13 @@ from torch.autograd import grad
 from torch_geometric.utils import scatter
 
 
-def get_output_by_string(key, **kwargs):
+def get_output_by_string(key, model, scalers):
     if key == 'energy':
-        output_layer = EnergyOutput(**kwargs)
-    elif key == 'forces':
-        output_layer = GradientForceOutput(**kwargs)
+        output_layer = EnergyOutput(model.n_features, model.activation, scalers['energy'])
+    elif key == 'gradient_force':
+        output_layer = GradientForceOutput()
+    elif key == 'direct_force':
+        output_layer = DirectForceOutput(scalers['force'])
     # elif key == 'hessian':
     #     output_layer = SecondDerivativeProperty(
     #         dependent_property='forces',
@@ -20,6 +22,15 @@ def get_output_by_string(key, **kwargs):
     else:
         raise NotImplementedError(f'Output type {key} is not implemented yet')
     return output_layer
+
+
+class CustomOutputs:
+    def __init__(self, z, pos, batch, atom_node, force_node):
+        self.z = z
+        self.pos = pos
+        self.batch = batch
+        self.atom_node = atom_node
+        self.force_node = force_node
 
 
 class DirectProperty(nn.Module):
@@ -42,9 +53,8 @@ class EnergyOutput(DirectProperty):
         activation (nn.Module): Activation function.
         scaler (nn.Module): The normalizer for the atomic properties.
     '''
-    def __init__(self, n_features=None, activation=None, scaler=None, **kwargs):
+    def __init__(self, n_features, activation, scaler):
         super(EnergyOutput, self).__init__()
-        self.key = 'energy'
         self.layers = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
@@ -55,36 +65,44 @@ class EnergyOutput(DirectProperty):
         print(self.layers[0].weight.std())
         self.scaler = scaler
 
-    def forward(self, inputs):
-        output = self.layers(inputs.atom_node)
-        output = self.scaler(output, inputs.z)
-        output = scatter(output, inputs.batch, dim=0, reduce='sum').reshape(-1)
-        return output
+    def forward(self, outputs):
+        energy = self.layers(outputs.atom_node)
+        energy = self.scaler(energy, outputs.z)
+        energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
+        outputs.energy = energy
+        return outputs
 
 class GradientForceOutput(FirstDerivativeProperty):
     '''
     Gradient force prediction
     '''
-    def __init__(self, **kwargs):
+    def __init__(self):
         super(GradientForceOutput, self).__init__()
-        self.key = 'force'
-        self.requires_dr = False
 
-    def forward(self, inputs):
-        # output = grad(
-        #     inputs.energy.sum(), 
-        #     inputs.pos, 
-        #     create_graph=True, 
-        #     retain_graph=True,
-            # )[0]
-        output = grad(
-            inputs.energy, 
-            inputs.pos, 
-            grad_outputs=torch.ones_like(inputs.energy),
+    def forward(self, outputs):
+        force = -grad(
+            outputs.energy, 
+            outputs.pos, 
+            grad_outputs=torch.ones_like(outputs.energy),
             create_graph=True, 
             retain_graph=True,
             )[0]
-        return -output
+        outputs.gradient_force = force
+        return outputs
+    
+class DirectForceOutput(DirectProperty):
+    '''
+    Direct force prediction
+    '''
+    def __init__(self, scaler):
+        super(DirectForceOutput, self).__init__()
+        self.scaler = scaler
+
+    def forward(self, outputs):
+        force = outputs.force_node.sum(dim=-1)
+        force = self.scaler(force, outputs.z)
+        outputs.direct_force = force
+        return outputs
 
 
 # class InvariantNodeProperty(nn.Module):

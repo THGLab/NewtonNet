@@ -2,226 +2,145 @@ import torch
 import torch.nn as nn
 from torch_geometric.utils import scatter
 
-def get_loss_by_string(mode=None, **kwargs):
+def get_loss_by_string(losses):
     '''
     Get loss function by string
 
     Parameters:
-        mode (str): The loss function to use. Default: None.
-        w_energy (float): The weight for the energy loss. Default: 0.0.
-        w_force (float): The weight for the force loss. Default: 0.0.
-        w_force_mag (float): The weight for the force magnitude loss. Default: 0.0.
-        w_force_dir (float): The weight for the force direction loss. Default: 0.0.
+        losses (dict): The loss function settings.
+            key (str): The loss function type.
+            value (dict): The loss function settings.
+                weight (float): The weight for the loss function. Default: None.
+                mode (str): The loss function to use. Default: 'mse'.
+                    'mse': Mean squared error.
+                    'mae': Mean absolute error.
+                    'huber': Huber loss.
+                transform (str): The transformation to apply to the data. Default: None.
+                    'cos': 1 - cosine similarity.
+                    'norm': Norm.
 
     Returns:
-        pre_loss (nn.Module): The pre-training loss function for model initialization.
         main_loss (nn.Module): The main loss function for model training (back propagation) and validation (learning rate scheduling).
         eval_loss (nn.Module): The evaluation loss function for task-specific model evaluation.
     '''
-    if mode is None:
-        pre_loss = MultitaskLoss(loss_fns=[], sum=True)
-        main_loss = MultitaskLoss(loss_fns=[], sum=True)
-        eval_loss = MultitaskLoss(loss_fns=[], sum=False)
-
-    elif mode == 'energy':
-        pre_losses = []
-        weights = []
-        if kwargs.get('w_energy', 0.0) > 0.0:
-            pre_losses.append(EnergyDistributionLoss(mode='mse'))
-            weights.append(1.0)
-        pre_loss = MultitaskLoss(loss_fns=pre_losses, sum=True, weights=weights)
-
-        main_losses = []
-        weights = []
-        if kwargs.get('w_energy', 0.0) > 0.0:
-            main_losses.append(EnergyLoss(mode='mse'))
-            weights.append(kwargs['w_energy'])
-        main_loss = MultitaskLoss(loss_fns=main_losses, sum=True, weights=weights)
-
-        eval_losses = []
-        eval_losses.append(EnergyLoss(mode='mae'))
-        eval_losses.append(EnergyLoss(mode='mse'))
-        eval_losses.append(EnergyPerAtomLoss(mode='mae'))
-        eval_losses.append(EnergyPerAtomLoss(mode='mse'))
-        eval_loss = MultitaskLoss(loss_fns=eval_losses, sum=False)
-
-    elif mode == 'energy/forces':
-        pre_losses = []
-        weights = []
-        if kwargs.get('w_energy', 0.0) > 0.0:
-            pre_losses.append(EnergyDistributionLoss(mode='mse'))
-            weights.append(1.0)
-        pre_loss = MultitaskLoss(loss_fns=pre_losses, sum=True, weights=weights)
-
-        main_losses = []
-        weights = []
-        if kwargs.get('w_energy', 0.0) > 0.0:
-            main_losses.append(EnergyLoss(mode='mse'))
-            weights.append(kwargs['w_energy'])
-        if kwargs.get('w_force', 0.0) > 0.0:
-            main_losses.append(ForcesLoss(mode='mse'))
-            weights.append(kwargs['w_force'])
-        if kwargs.get('w_force_mag', 0.0) > 0.0:
-            main_losses.append(ForcesNormLoss(mode='mse'))
-            weights.append(kwargs['w_force_mag'])
-        if kwargs.get('w_force_dir', 0.0) > 0.0:
-            main_losses.append(ForcesCosLoss(mode='mse'))
-            weights.append(kwargs['w_force_dir'])
-        main_loss = MultitaskLoss(loss_fns=main_losses, sum=True, weights=weights)
-
-        eval_losses = []
-        eval_losses.append(EnergyLoss(mode='mae'))
-        eval_losses.append(EnergyLoss(mode='mse'))
-        eval_losses.append(EnergyPerAtomLoss(mode='mae'))
-        eval_losses.append(EnergyPerAtomLoss(mode='mse'))
-        eval_losses.append(ForcesLoss(mode='mae'))
-        eval_losses.append(ForcesLoss(mode='mse'))
-        eval_loss = MultitaskLoss(loss_fns=eval_losses, sum=False)
-        
-    else:
-        raise ValueError(f'loss {mode} not implemented')
-    
+    main_losses = []
+    eval_losses = []
+    for key, kwargs in losses.items():
+        if key == 'energy':
+            main_losses.append(EnergyLoss(**kwargs))
+            eval_losses.append(EnergyLoss(mode='mae'))
+            eval_losses.append(EnergyLoss(mode='mse'))
+            eval_losses.append(EnergyPerAtomLoss(mode='mae'))
+            eval_losses.append(EnergyPerAtomLoss(mode='mse'))
+        elif key == 'gradient_force':
+            main_losses.append(GradientForceLoss(**kwargs))
+            eval_losses.append(GradientForceLoss(mode='mae'))
+            eval_losses.append(GradientForceLoss(mode='mse'))
+        elif key == 'direct_force':
+            main_losses.append(DirectForceLoss(**kwargs))
+            eval_losses.append(DirectForceLoss(mode='mae'))
+            eval_losses.append(DirectForceLoss(mode='mse'))
+            eval_losses.append(DirectForceLoss(mode='mae', transform='cos'))
+            eval_losses.append(DirectForceLoss(mode='mse', transform='cos'))
+            eval_losses.append(DirectForceLoss(mode='mae', transform='norm'))
+            eval_losses.append(DirectForceLoss(mode='mse', transform='norm'))
+        main_loss = lambda pred, data: sum([loss_fn(pred, data) for loss_fn in main_losses])
+        eval_loss = lambda pred, data: {loss_fn.name: loss_fn(pred, data) for loss_fn in eval_losses}
     return main_loss, eval_loss
 
 
 class BaseLoss(nn.Module):
-    def __init__(self, mode: str = 'mse'):
+    '''
+    Base loss class
+
+    Parameters:
+        weight (float): The weight for the loss function.
+        mode (str): The loss function to use.
+            'mse': Mean squared error.
+            'mae': Mean absolute error.
+            'huber': Huber loss.
+        transform (str): The transformation to apply to the data. Default: None.
+            'cos': 1 - cosine similarity.
+            'norm': Norm.
+    '''
+    def __init__(self, weight: float, mode: str, transform: str = None, **kwargs):
         super(BaseLoss, self).__init__()
+        self.weight = weight
         self.mode = mode
         if self.mode == 'mse':
             self.loss_fn = nn.MSELoss()
         elif self.mode == 'mae':
             self.loss_fn = nn.L1Loss()
-        elif self.mode == 'mcs':
-            self.loss_fn = lambda x, y: (1 - torch.cosine_similarity(x, y, dim=-1)).mean()
+        elif self.mode == 'huber':
+            self.loss_fn = nn.HuberLoss(**kwargs)
         else:
             raise ValueError(f'loss mode {mode} not implemented')
+        self.transform = transform
+        if self.transform == 'cos':
+            self.cos = nn.CosineSimilarity(dim=-1)
+            self.transform_fn = lambda x, y: (self.cos(x, y), torch.ones(x.shape[:-1], device=x.device))
+        elif self.transform == 'norm':
+            self.transform_fn = lambda x, y: (x.norm(dim=-1), y.norm(dim=-1))
+        else:
+            raise ValueError(f'transform {transform} not implemented')
+        
+    def forward(self, pred, data):
+        if self.weight == 0:
+            return 0
+        value_pred, value_data = self.from_outputs(pred, data)
+        if self.transform is not None:
+            value_pred, value_data = self.transform_fn(value_pred, value_data)
+        loss = self.loss_fn(value_pred, value_data)
+        if self.weight == 1:
+            return loss
+        else:
+            return self.weight * loss
+    
+    def from_outputs(self, pred, data):
+        raise NotImplementedError
+    
 
 class EnergyLoss(BaseLoss):
-    def __init__(self, mode='mse'):
-        super(EnergyLoss, self).__init__(mode)
-        self.name = f'energy_{self.mode}'
+    def __init__(self, **kwargs):
+        super(EnergyLoss, self).__init__(**kwargs)
+        if self.transform is None:
+            self.name = f'energy_{self.mode}'
+        else:
+            raise ValueError(f'transform {self.transform} for energy not implemented')
 
-    def forward(self, pred, data):
-        loss = self.loss_fn(pred.energy, data.energy)
-        return loss
+    def from_outputs(self, pred, data):
+        return pred.energy, data.energy
 
 class EnergyPerAtomLoss(BaseLoss):
-    def __init__(self, mode='mse'):
-        super(EnergyPerAtomLoss, self).__init__(mode)
-        self.name = f'energy_per_atom_{self.mode}'
-
-    def forward(self, pred, data):
-        n_atoms = scatter(torch.ones_like(data.z), data.batch)
-        loss = self.loss_fn(pred.energy / n_atoms, data.energy / n_atoms)
-        return loss
-    
-class EnergyDistributionLoss(BaseLoss):
-    def __init__(self, mode='mse'):
-        super(EnergyDistributionLoss, self).__init__(mode)
-        self.name = f'energy_distribution_{self.mode}'
-
-    def forward(self, pred, data):
-        loss = self.loss_fn(pred.energy.mean(), data.energy.mean()) + self.loss_fn(pred.energy.std(), data.energy.std())
-        return loss
-
-class ForcesLoss(BaseLoss):
-    def __init__(self, mode='mse'):
-        super(ForcesLoss, self).__init__(mode)
-        self.name = f'forces_{self.mode}'
-
-    def forward(self, pred, data):
-        loss = self.loss_fn(pred.force, data.force)
-        return loss
-
-class ForcesNormLoss(BaseLoss):
-    def __init__(self, mode='mse'):
-        super(ForcesNormLoss, self).__init__(mode)
-        self.name = f'forces_norm_{self.mode}'
-
-    def forward(self, pred, data):
-        loss = self.loss_fn(pred.force.norm(dim=-1), data.force.norm(dim=-1))
-        return loss
-
-
-# class ScalarLoss(BaseLoss):
-#     def __init__(self, **kwargs):
-#         super(ScalarLoss, self).__init__(**kwargs)
-#         if self.per_atom:
-#             self.name = f'{self.key}_per_atom_{self.mode}'
-#         else:
-#             self.name = f'{self.key}_{self.mode}'
-
-#     def forward(self, pred, data):
-#         if self.per_atom:
-#             n_atoms = scatter(data.z, data.batch)
-#             loss = self.loss_fn(
-#                 pred.__getattribute__(self.key) / n_atoms, 
-#                 data.__getattribute__(self.key) / n_atoms,
-#                 )
-#         else:
-#             loss = self.loss_fn(
-#                 pred.__getattribute__(self.key), 
-#                 data.__getattribute__(self.key),
-#                 )
-#         return loss
-        
-# class VectorLoss(BaseLoss):
-#     def __init__(self, **kwargs):
-#         super(VectorLoss, self).__init__(**kwargs)
-#         self.name = f'{self.key}_{self.mode}'
-
-#     def forward(self, pred, data):
-#         loss = self.loss_fn(
-#             pred.__getattribute__(self.key),
-#             data.__getattribute__(self.key),
-#             )
-#         return loss
-    
-# class VectorNormLoss(BaseLoss):
-#     def __init__(self, **kwargs):
-#         super(VectorNormLoss, self).__init__(**kwargs)
-#         self.name = f'{self.key}_norm_{self.mode}'
-
-#     def forward(self, pred, data):
-#         loss = self.loss_fn(
-#             pred.__getattribute__(self.key).norm(dim=-1),
-#             data.__getattribute__(self.key).norm(dim=-1),
-#             )
-#         return loss
-    
-# class VectorCosLoss(BaseLoss):
-#     def __init__(self, **kwargs):
-#         super(VectorCosLoss, self).__init__(**kwargs)
-#         self.cos = nn.CosineSimilarity(dim=-1)
-#         self.name = f'{self.key}_cos_{self.mode}'
-
-#     def forward(self, pred, data):
-#         cos = self.cos(
-#             pred.__getattribute__(self.key), 
-#             data.__getattribute__(self.key),
-#             )
-#         loss = self.loss_fn(cos, torch.ones_like(cos))
-#         return loss
-
-
-class MultitaskLoss(nn.Module):
-    '''
-    Multitask loss class
-
-    Parameters:
-        loss_fns (list): The list of loss functions.
-        sum (bool): Whether to sum the loss functions. Default: True.
-        weights (list): The list of weights for the loss functions. Default: None.
-    '''
-    def __init__(self, loss_fns: list, sum: bool = True, weights: list = None):
-        super(MultitaskLoss, self).__init__()
-        self.loss_fns = loss_fns
-        self.sum = sum
-        self.weights = weights
-
-    def forward(self, pred, data):
-        if self.sum:
-            return sum([loss_fn(pred, data) * weight for loss_fn, weight in zip(self.loss_fns, self.weights)])
+    def __init__(self, **kwargs):
+        super(EnergyPerAtomLoss, self).__init__(**kwargs)
+        if self.transform is None:
+            self.name = f'energy_per_atom_{self.mode}'
         else:
-            return {loss_fn.name: loss_fn(pred, data) for loss_fn in self.loss_fns}
+            raise ValueError(f'transform {self.transform} for energy per atom not implemented')
+
+    def from_outputs(self, pred, data):
+        n_atoms = scatter(torch.ones_like(data.z), data.batch)
+        return pred.energy / n_atoms, data.energy / n_atoms
+
+class GradientForceLoss(BaseLoss):
+    def __init__(self, **kwargs):
+        super(GradientForceLoss, self).__init__(**kwargs)
+        if self.transform is None:
+            self.name = f'gradient_force_{self.mode}'
+        else:
+            self.name = f'gradient_force_{self.transform}_{self.mode}'
+            
+    def from_outputs(self, pred, data):
+        return pred.gradient_force, data.force
+    
+class DirectForceLoss(BaseLoss):
+    def __init__(self, **kwargs):
+        super(DirectForceLoss, self).__init__(**kwargs)
+        if self.transform is None:
+            self.name = f'direct_force_{self.mode}'
+        else:
+            self.name = f'direct_force_{self.transform}_{self.mode}'
+            
+    def from_outputs(self, pred, data):
+        return pred.direct_force, data.force
