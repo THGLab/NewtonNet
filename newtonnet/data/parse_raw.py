@@ -36,10 +36,7 @@ def parse_train_test(
         train_batch_size (int): The batch size for training. Default: 32.
         val_batch_size (int): The batch size for validation. Default: 32.
         test_batch_size (int): The batch size for testing. Default: 32.
-        transform (callable): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before every access. Default: None.
-        pre_transform (callable): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before being saved to disk. Default: None.
-        pre_filter (callable): A function that takes in a data object and returns a boolean value, indicating whether the data object should be included in the final dataset. Default: None.
-        force_reload (bool): Whether to re-process the dataset. Default: False.
+        dataset_kwargs (dict): The keyword arguments for MolecularDataset.
 
     Returns:
         train_gen (torch.utils.data.DataLoader): The training data loader.
@@ -82,8 +79,17 @@ def parse_train_test(
     stats_path = osp.join(train_root, 'processed', 'stats.json')
     with open(stats_path, 'r') as f:
         stats = json.load(f)
-    print(f'stats: {stats}')
-    for key in stats:
-        stats[key] = torch.tensor(stats[key])
+    print('stats:')
+    process_stats(stats)
 
     return train_gen, val_gen, test_gen, stats
+
+def process_stats(stats, level=1):
+    for key, value in stats.items():
+        if isinstance(value, dict):
+            print('  ' * level + f'{key}:')
+            process_stats(value, level + 1)
+        else:
+            print('  ' * level + f'{key}: {value}')
+            stats[key] = torch.tensor(value)
+    return stats

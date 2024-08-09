@@ -5,11 +5,11 @@ from torch_geometric.nn import SumAggregation, MeanAggregation, StdAggregation
 from torch_geometric.utils import one_hot
 
 
-def get_scaler_by_string(key, stats):
+def get_scaler_by_string(key, **stat):
     if key == 'energy':
-        scaler = ScaleShift(stats['z'], stats['energy_shift'], stats['energy_scale'])
-    elif key == 'forces':
-        scaler = NullScaleShift()
+        scaler = ScaleShift(**stat)
+    elif key == 'force':
+        scaler = ScaleShift(**stat)
     elif key == 'hessian':
         scaler = NullScaleShift()
     else:
@@ -27,21 +27,21 @@ class ScaleShift(nn.Module):
         shift (torch.Tensor): The shift values for the properties.
         scale (torch.Tensor): The scale values for the properties.
     '''
-    def __init__(self, z, shift, scale):
+    def __init__(self, z, shift=None, scale=None):
         super(ScaleShift, self).__init__()
         self.z_max = z.max().item()
-        shift_dense = torch.zeros(self.z_max + 1)
-        shift_dense[z] = shift
-        self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1), freeze=True)
-        if scale.ndim == 0:
-            # self.scale = nn.Embedding.from_pretrained(torch.full((self.z_max + 1, 1), scale), freeze=True)
-            self.scale = nn.Parameter(scale, requires_grad=False)
-            self.single_scale = True
+        if shift is not None:
+            shift_dense = torch.zeros(self.z_max + 1)
+            shift_dense[z] = shift
+            self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1), freeze=True)
         else:
+            self.shift = None
+        if scale is not None:
             scale_dense = torch.zeros(self.z_max + 1)
             scale_dense[z] = scale
             self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1), freeze=True)
-            self.single_scale = False
+        else:
+            self.scale = None
 
     def forward(self, inputs, z):
         '''
@@ -54,10 +54,12 @@ class ScaleShift(nn.Module):
         Returns:
             torch.Tensor: The normalized inputs.
         '''
-        if self.single_scale:
-            outputs = inputs * self.scale + self.shift(z)
-        else:
-            outputs = inputs * self.scale(z) + self.shift(z)
+        if isinstance(self.scale, nn.Embedding):
+            outputs = inputs * self.scale(z)
+        elif isinstance(self.scale, nn.Parameter):
+            outputs = inputs * self.scale
+        if isinstance(self.shift, nn.Embedding):
+            outputs = outputs + self.shift(z)
         # outputs = inputs * self.scale(z) + self.shift(z)
         # outputs = inputs + self.shift(z)
         return outputs
