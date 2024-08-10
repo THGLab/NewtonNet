@@ -56,7 +56,6 @@ class Trainer(object):
         
         # training parameters
         self.model = model
-        self.print_layers()
         self.main_loss, self.eval_loss = loss_fns
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
@@ -79,15 +78,16 @@ class Trainer(object):
             checkpoint = torch.load(os.path.join(resume_from, 'models', 'train_state.tar'))
             self.start_epoch = checkpoint['epoch'] + 1
             self.start_step = checkpoint['step'] + 1
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            self.model = checkpoint['model']
+            self.optimizer = checkpoint['optimizer']
+            self.lr_scheduler = checkpoint['scheduler']
             self.best_val_loss = checkpoint['best_val_loss']
             self.log = pd.read_csv(os.path.join(resume_from, 'log.csv'))
         else:
             self.start_epoch = 0
             self.start_step = 0
             self.log = pd.DataFrame()
+        self.print_layers()
 
     def make_subdirs(self, output_base_path, script_path, settings_path):
         assert output_base_path is not None, 'output_base_path must be specified'
@@ -253,8 +253,8 @@ class Trainer(object):
                 torch.save({
                         'epoch': epoch,
                         'step': step,
-                        'model_state_dict': self.model.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict(),
-                        'scheduler_state_dict': self.lr_scheduler.state_dict(),
+                        'model': self.model,
+                        'optimizer': self.optimizer,
+                        'scheduler': self.lr_scheduler,
                         'best_val_loss': self.best_val_loss,
                     }, os.path.join(self.model_path, 'train_state.tar'))
