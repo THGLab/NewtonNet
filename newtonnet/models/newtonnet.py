@@ -195,11 +195,11 @@ class InteractionNet(nn.Module):
             nn.Linear(n_features, n_features),
         )
 
-        self.inv_update1 = nn.Sequential(
-            nn.Linear(n_features, n_features),
-            activation,
-            nn.Linear(n_features, n_features),
-        )
+        # self.inv_update1 = nn.Sequential(
+        #     nn.Linear(n_features, n_features),
+        #     activation,
+        #     nn.Linear(n_features, n_features),
+        # )
         self.inv_update2 = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
@@ -216,8 +216,8 @@ class InteractionNet(nn.Module):
         # message_edgepart = self.message_edgepart(rbf_edge) * cutoff_edge    # n_edges, n_features
         message = message_edgepart * message_nodepart[edge_index[0]] * message_nodepart[edge_index[1]]    # n_edges, n_features
 
-        inv_update1 = self.inv_update1(message)    # n_edges, n_features
-        # inv_update1 = message    # n_nodes, n_features
+        # inv_update1 = self.inv_update1(message)    # n_edges, n_features
+        inv_update1 = message    # n_nodes, n_features
         inv_update1 = scatter(inv_update1, edge_index[0], dim=0, dim_size=atom_node.size(0))    # n_nodes, n_features
         atom_node = atom_node + inv_update1    # n_nodes, n_features
 

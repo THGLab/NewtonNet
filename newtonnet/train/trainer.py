@@ -27,7 +27,7 @@ class Trainer(object):
         output_base_path (str): The base path for the output directory.
         script_path (str): The path to the script that was used to start the training.
         settings_path (str): The path to the settings file that was used to start the training.
-        resume_training (str): The path to a checkpoint to resume training from. Default: False.
+        resume_from (str): The path to a checkpoint to resume training from. Default: False.
         check_log (int): The interval in epochs for logging the training progress. Default: 1.
         check_val (int): The interval in epochs for validation. Default: 1.
         check_test (int): The interval in epochs for testing. Default: 1.
@@ -44,7 +44,7 @@ class Trainer(object):
             output_base_path: str = None,
             script_path: str = None,
             settings_path: str = None,
-            resume_training: str = None,
+            resume_from: str = None,
             check_log: int = 1,
             check_val: int = 1,
             check_test: int = 1,
@@ -75,14 +75,14 @@ class Trainer(object):
         self.check_model = check_model
 
         # checkpoints
-        if resume_training is not None:
-            checkpoint = torch.load(os.path.join(resume_training, 'models/train_state.tar'))
+        if resume_from is not None:
+            checkpoint = torch.load(os.path.join(resume_from, 'models', 'train_state.tar'))
             self.start_epoch = checkpoint['epoch'] + 1
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             self.best_val_loss = checkpoint['best_val_loss']
-            self.log = pd.read_csv(os.path.join(resume_training, 'log.csv'))
+            self.log = pd.read_csv(os.path.join(resume_from, 'log.csv'))
         else:
             self.start_epoch = 0
             self.log = pd.DataFrame()
@@ -147,7 +147,7 @@ class Trainer(object):
         plt.close()
 
     def local_log(self, log):
-        log = pd.DataFrame(log)
+        log = pd.DataFrame(log, index=[0])
         self.log = pd.concat([self.log, log], ignore_index=True)
         self.log.to_csv(os.path.join(self.output_path, 'log.csv'), index=False)
 
@@ -166,9 +166,10 @@ class Trainer(object):
 
         step = 0
         for epoch in tqdm(range(self.start_epoch, epochs + 1)):
+            train_log, val_log, test_log = {}, {}, {}
+
             # training
             self.model.train()
-            train_log = {}
 
             for train_batch in train_generator:
                 self.optimizer.zero_grad()
@@ -187,7 +188,6 @@ class Trainer(object):
             # validation
             if epoch % self.check_val == 0:
                 self.model.eval()
-                val_log = {}
 
                 for val_batch in val_generator:
                     preds = self.model(val_batch.z, val_batch.pos, val_batch.edge_index, val_batch.batch)
@@ -213,12 +213,12 @@ class Trainer(object):
 
             # learning rate decay
             if isinstance(self.lr_scheduler, ReduceLROnPlateau):
-                self.lr_scheduler.step(val_log['val_loss'])
+                if 'val_loss' in val_log:
+                    self.lr_scheduler.step(val_log['val_loss'])
             elif isinstance(self.lr_scheduler, LRScheduler):
                 self.lr_scheduler.step()
 
             # save test predictions
-            test_log = {}
             if epoch % self.check_test == 0:
                 self.model.eval()
 
@@ -237,7 +237,7 @@ class Trainer(object):
             # plots
             if epoch % self.check_log == 0:
                 self.plot_grad_flow(epoch)
-                self.local_log({**train_log, **val_log, **test_log})
+                self.local_log({'epoch': epoch, 'step': step} | train_log | val_log | test_log)
 
             # # loss force weight decay
             # self.main_loss.force_loss_decay()
