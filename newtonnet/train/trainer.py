@@ -201,23 +201,6 @@ class Trainer(object):
                     val_log[key] /= len(val_generator)
                 wandb.log({'epoch': epoch, 'step': step} | val_log)
 
-            # best model
-            if epoch % self.check_model == 0:
-                if val_log['val_loss'] < self.best_val_loss:
-                    self.best_val_loss = val_log['val_loss']
-                    if self.multi_gpu:
-                        save_model = self.model.module
-                    else:
-                        save_model = self.model
-                    torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
-
-            # learning rate decay
-            if isinstance(self.lr_scheduler, ReduceLROnPlateau):
-                if 'val_loss' in val_log:
-                    self.lr_scheduler.step(val_log['val_loss'])
-            elif isinstance(self.lr_scheduler, LRScheduler):
-                self.lr_scheduler.step()
-
             # save test predictions
             if epoch % self.check_test == 0:
                 self.model.eval()
@@ -234,10 +217,27 @@ class Trainer(object):
                     test_log[key] /= len(test_generator)
                 wandb.log({'epoch': epoch, 'step': step} | test_log)
 
+            # best model
+            if epoch % self.check_model == 0:
+                if val_log['val_loss'] < self.best_val_loss:
+                    self.best_val_loss = val_log['val_loss']
+                    if self.multi_gpu:
+                        save_model = self.model.module
+                    else:
+                        save_model = self.model
+                    torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
+
             # plots
             if epoch % self.check_log == 0:
                 self.plot_grad_flow(epoch)
                 self.local_log({'epoch': epoch, 'step': step} | train_log | val_log | test_log)
+
+            # learning rate decay
+            if isinstance(self.lr_scheduler, ReduceLROnPlateau):
+                if 'val_loss' in val_log:
+                    self.lr_scheduler.step(val_log['val_loss'])
+            elif isinstance(self.lr_scheduler, LRScheduler):
+                self.lr_scheduler.step()
 
             # # loss force weight decay
             # self.main_loss.force_loss_decay()
