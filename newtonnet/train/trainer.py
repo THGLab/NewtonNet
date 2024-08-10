@@ -78,6 +78,7 @@ class Trainer(object):
         if resume_from is not None:
             checkpoint = torch.load(os.path.join(resume_from, 'models', 'train_state.tar'))
             self.start_epoch = checkpoint['epoch'] + 1
+            self.start_step = checkpoint['step'] + 1
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -85,6 +86,7 @@ class Trainer(object):
             self.log = pd.read_csv(os.path.join(resume_from, 'log.csv'))
         else:
             self.start_epoch = 0
+            self.start_step = 0
             self.log = pd.DataFrame()
 
     def make_subdirs(self, output_base_path, script_path, settings_path):
@@ -164,7 +166,7 @@ class Trainer(object):
         if self.multi_gpu:
             self.model = nn.DataParallel(self.model, device_ids=self.device)                
 
-        step = 0
+        step = self.start_step
         for epoch in tqdm(range(self.start_epoch, epochs + 1)):
             train_log, val_log, test_log = {}, {}, {}
 
@@ -180,10 +182,14 @@ class Trainer(object):
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
                 self.optimizer.step()
                 main_loss = main_loss.detach().item()
-                wandb.log({'epoch': epoch, 'step': step, 'train_loss': main_loss, 'lr': self.optimizer.param_groups[0]['lr']})
+                eval_loss = self.eval_loss(preds, train_batch)
+                wandb.log({'epoch': epoch, 'step': step, 'train_loss': main_loss, 'lr': self.optimizer.param_groups[0]['lr']} | {f'train_{key}': value.detach().item() for key, value in eval_loss.items()})
                 train_log['train_loss'] = train_log.get('train_loss', 0.0) + main_loss
+                for key, value in eval_loss.items():
+                    train_log[f'train_{key}'] = train_log.get(f'train_{key}', 0.0) + value.detach().item()
                 step += 1
-            train_log['train_loss'] /= len(train_generator)
+            for key, value in train_log.items():
+                train_log[key] /= len(train_generator)
 
             # validation
             if epoch % self.check_val == 0:
@@ -230,7 +236,7 @@ class Trainer(object):
             # plots
             if epoch % self.check_log == 0:
                 self.plot_grad_flow(epoch)
-                self.local_log({'epoch': epoch, 'step': step} | train_log | val_log | test_log)
+                self.local_log({'epoch': epoch, 'step': step, 'lr': self.optimizer.param_groups[0]['lr']} | train_log | val_log | test_log)
 
             # learning rate decay
             if isinstance(self.lr_scheduler, ReduceLROnPlateau):
@@ -246,6 +252,7 @@ class Trainer(object):
             if epoch % self.check_log == 0:
                 torch.save({
                         'epoch': epoch,
+                        'step': step,
                         'model_state_dict': self.model.state_dict(),
                         'optimizer_state_dict': self.optimizer.state_dict(),
                         'scheduler_state_dict': self.lr_scheduler.state_dict(),
