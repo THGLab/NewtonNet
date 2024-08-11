@@ -19,6 +19,7 @@ class NewtonNet(nn.Module):
         infer_properties (list): The properties to predict. Default: [].
         representations (dict): The distance transformation functions.
         scalers (nn.ModuleDict): The scalers for the chemical properties. Default: None.
+        train_scalers (bool): Whether to train the scalers. Default: False.
     '''
     def __init__(
             self,
@@ -28,6 +29,7 @@ class NewtonNet(nn.Module):
             infer_properties: list = [],
             representations: nn.Module = None,
             scalers: dict = None,
+            train_scaler: bool = False,
     ) -> None:
 
         super(NewtonNet, self).__init__()
@@ -53,6 +55,7 @@ class NewtonNet(nn.Module):
         self.output_layers = nn.ModuleList()
         for key in infer_properties:
             output_layer = get_output_by_string(key, n_features, activation, scalers)
+            output_layer.scaler.requires_grad_(train_scaler)
             self.output_layers.append(output_layer)
             if isinstance(output_layer, FirstDerivativeProperty):
                 self.embedding_layer.requires_dr = True
@@ -64,7 +67,8 @@ class NewtonNet(nn.Module):
         # device
         # self.to(device)
 
-    def forward(self, batch):
+    # def forward(self, batch):
+    def forward(self, z, pos, edge_index, batch):
         '''
         Network forward pass
 
@@ -78,8 +82,8 @@ class NewtonNet(nn.Module):
         Returns:
             outputs (dict): The outputs of the network.
         '''
-        z, pos, edge_index, batch = batch.z, batch.pos, batch.edge_index, batch.batch
-        
+        # z, pos, edge_index, batch = batch.z, batch.pos, batch.edge_index, batch.batch
+
         # initialize node and edge representations
         atom_node, force_node, disp_node, dir_edge, dist_edge = self.embedding_layer(z, pos, edge_index)
         # atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge = self.embedding_layer(z, pos, edge_index)
@@ -203,11 +207,12 @@ class InteractionNet(nn.Module):
         #     activation,
         #     nn.Linear(n_features, n_features),
         # )
-        self.inv_update2 = nn.Sequential(
-            nn.Linear(n_features, n_features),
-            activation,
-            nn.Linear(n_features, n_features),
-        )
+        # self.inv_update2 = nn.Sequential(
+        #     nn.Linear(n_features, n_features),
+        #     activation,
+        #     nn.Linear(n_features, n_features),
+        # )
+        self.equiv_update = nn.Linear(n_features, n_features, bias=False)
 
         # self.norm = nn.LayerNorm(n_features)
     
@@ -251,7 +256,8 @@ class InteractionNet(nn.Module):
 
         # update energy
         # inv_update2 = self.inv_update2(atom_node) * torch.sum(- force_node * disp_node, dim=1)  # n_nodes, n_features
-        inv_update2 = self.inv_update2(atom_node) * torch.sum(force_node * force_node, dim=1)    # n_nodes, n_features
+        # inv_update2 = self.inv_update2(atom_node) * torch.sum(force_node * force_node, dim=1)    # n_nodes, n_features
+        inv_update2 = torch.sum(force_node * self.equiv_update(force_node), dim=1)    # n_nodes, n_features
         atom_node = atom_node + inv_update2
 
         # # layer norm

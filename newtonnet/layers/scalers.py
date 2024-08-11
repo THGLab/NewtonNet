@@ -41,32 +41,33 @@ class ScaleShift(nn.Module):
         if scale is None:
             self.scale = None
         elif scale.numel() == 1:
-            self.scale = nn.Parameter(scale, requires_grad=True)
+            self.scale = nn.Parameter(scale * 100, requires_grad=True)
         else:
             scale_dense = torch.zeros(self.z_max + 1)
-            scale_dense[z] = scale
+            scale_dense[z] = scale * 100
             self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1), freeze=False)
 
-    def forward(self, inputs, z):
+    def forward(self, input, z):
         '''
-        Scale and shift inputs.
+        Scale and shift input.
 
         Args:
-            inputs (torch.Tensor): The input values.
+            input (torch.Tensor): The input values.
             z (torch.Tensor): The atomic numbers of the atoms in the molecule.
 
         Returns:
             torch.Tensor: The normalized inputs.
         '''
+        output = input
         if isinstance(self.scale, nn.Embedding):
-            outputs = inputs * self.scale(z)
+            output = output * self.scale(z)
         elif isinstance(self.scale, nn.Parameter):
-            outputs = inputs * self.scale
+            output = output * self.scale
         if isinstance(self.shift, nn.Embedding):
-            outputs = outputs + self.shift(z)
+            output = output + self.shift(z)
         # outputs = inputs * self.scale(z) + self.shift(z)
         # outputs = inputs + self.shift(z)
-        return outputs
+        return output
     
     def __repr__(self):
         return f'{self.__class__.__name__}(scale={self.scale is not None}, shift={self.shift is not None})'

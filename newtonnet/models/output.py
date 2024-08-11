@@ -3,6 +3,8 @@ from torch import nn
 from torch.autograd import grad
 from torch_geometric.utils import scatter
 
+from newtonnet.layers.scalers import NullScaleShift
+
 
 def get_output_by_string(key, n_features, activation, scalers):
     if key == 'energy':
@@ -62,7 +64,6 @@ class EnergyOutput(DirectProperty):
             activation,
             nn.Linear(n_features, 1),
             )
-        print(self.layers[0].weight.std())
         self.scaler = scaler
 
     def forward(self, outputs):
@@ -78,6 +79,7 @@ class GradientForceOutput(FirstDerivativeProperty):
     '''
     def __init__(self):
         super(GradientForceOutput, self).__init__()
+        self.scaler = NullScaleShift()
 
     def forward(self, outputs):
         force = -grad(
