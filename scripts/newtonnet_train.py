@@ -1,7 +1,6 @@
 #! /usr/bin/env python
 
 import os
-import os.path as osp
 import argparse
 import yaml
 import json
@@ -31,13 +30,25 @@ parser.add_argument(
     '-c',
     '--config',
     type=str,
-    required=True,
     help='The path to the Yaml configuration file.',
+    )
+parser.add_argument(
+    '-r',
+    '--resume',
+    type=str,
+    help='The path to the checkpoint to resume training.',
     )
 
 # define arguments
 args = parser.parse_args()
-config = args.config
+checkpoint = args.resume
+if checkpoint is None:
+    config = args.config
+else:
+    assert args.config is None, 'Cannot resume and train from scratch at the same time.'
+    configs = [file for file in os.listdir(os.path.join(checkpoint, 'run_scripts')) if any(file.endswith(ext) for ext in ['.yaml', '.yml'])]
+    assert len(configs) == 1, f'Found {len(configs)} config files in {checkpoint}.'
+    config = os.path.join(checkpoint, 'run_scripts', configs[0])
 
 # locate files
 settings_path = os.path.abspath(config)
@@ -107,13 +118,13 @@ trainer = Trainer(
     script_path=script_path,
     settings_path=settings_path,
     device=device,
-    **settings['checkpoint'],
-    )
-trainer.train(
     train_generator=train_gen,
     val_generator=val_gen,
     test_generator=test_gen,
     **settings['training'],
     )
+if checkpoint is not None:
+    trainer.resume(checkpoint)
+trainer.train()
 
 print('done!')
