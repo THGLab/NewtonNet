@@ -30,18 +30,22 @@ class ScaleShift(nn.Module):
     def __init__(self, z, shift=None, scale=None):
         super(ScaleShift, self).__init__()
         self.z_max = z.max().item()
-        if shift is not None:
+        if shift is None:
+            self.shift = None
+        elif shift.numel() == 1:
+            self.shift = nn.Parameter(shift, requires_grad=True)
+        else:
             shift_dense = torch.zeros(self.z_max + 1)
             shift_dense[z] = shift
-            self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1), freeze=True)
+            self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1), freeze=False)
+        if scale is None:
+            self.scale = None
+        elif scale.numel() == 1:
+            self.scale = nn.Parameter(scale, requires_grad=True)
         else:
-            self.shift = None
-        if scale is not None:
             scale_dense = torch.zeros(self.z_max + 1)
             scale_dense[z] = scale
-            self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1), freeze=True)
-        else:
-            self.scale = None
+            self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1), freeze=False)
 
     def forward(self, inputs, z):
         '''
@@ -63,6 +67,9 @@ class ScaleShift(nn.Module):
         # outputs = inputs * self.scale(z) + self.shift(z)
         # outputs = inputs + self.shift(z)
         return outputs
+    
+    def __repr__(self):
+        return f'{self.__class__.__name__}(scale={self.scale is not None}, shift={self.shift is not None})'
     
 
 class NullScaleShift(nn.Module):
