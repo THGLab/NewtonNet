@@ -124,6 +124,7 @@ class Trainer(object):
         self.optimizer.load_state_dict(train_state['optimizer_state_dict'])
         self.lr_scheduler.load_state_dict(train_state['scheduler_state_dict'])
         self.best_val_loss = train_state['best_val_loss']
+        torch.set_rng_state(train_state['rng_state'])
         self.log = pd.read_csv(os.path.join(checkpoint, 'log.csv'))
 
     def print_layers(self):
@@ -172,7 +173,8 @@ class Trainer(object):
 
             for train_batch in self.train_generator:
                 self.optimizer.zero_grad()
-                preds = self.model(train_batch)
+                # preds = self.model(train_batch)
+                preds = self.model(train_batch.z, train_batch.pos, train_batch.edge_index, train_batch.batch)
                 main_loss = self.main_loss(preds, train_batch)
                 main_loss.backward()
                 if self.clip_grad > 0:
@@ -193,7 +195,8 @@ class Trainer(object):
                 self.model.eval()
 
                 for val_batch in self.val_generator:
-                    preds = self.model(val_batch)
+                    # preds = self.model(val_batch)
+                    preds = self.model(val_batch.z, val_batch.pos, val_batch.edge_index, val_batch.batch)
                     main_loss = self.main_loss(preds, val_batch)
                     val_log['val_loss'] = val_log.get('val_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, val_batch)
@@ -209,7 +212,8 @@ class Trainer(object):
                 self.model.eval()
 
                 for test_batch in self.test_generator:
-                    preds = self.model(test_batch)
+                    # preds = self.model(test_batch)
+                    preds = self.model(test_batch.z, test_batch.pos, test_batch.edge_index, test_batch.batch)
                     main_loss = self.main_loss(preds, test_batch)
                     test_log['test_loss'] = test_log.get('test_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, test_batch)
@@ -233,7 +237,7 @@ class Trainer(object):
             # plots
             if epoch % self.check_log == 0:
                 self.plot_grad_flow(epoch)
-                self.local_log({'epoch': epoch, 'step': step, 'lr': self.optimizer.param_groups[0]['lr']} | train_log | val_log | test_log)
+            self.local_log({'epoch': epoch, 'step': step, 'lr': self.optimizer.param_groups[0]['lr']} | train_log | val_log | test_log)
 
             # learning rate decay
             if isinstance(self.lr_scheduler, ReduceLROnPlateau):
@@ -254,4 +258,5 @@ class Trainer(object):
                         'optimizer_state_dict': self.optimizer.state_dict(),
                         'scheduler_state_dict': self.lr_scheduler.state_dict(),
                         'best_val_loss': self.best_val_loss,
+                        'rng_state': torch.get_rng_state(),
                     }, os.path.join(self.model_path, 'train_state.pt'))
