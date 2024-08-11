@@ -11,6 +11,8 @@ import torch
 from torch import nn, optim
 from torch.optim import SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LRScheduler
+from torch_geometric.loader import DataLoader
+from torch_geometric.nn import DataParallel
 
 from newtonnet.train.loss import get_loss_by_string
 
@@ -40,17 +42,18 @@ class Trainer(object):
             model: nn.Module,
             loss_fns: tuple[nn.Module] = None,
             optimizer: optim.Optimizer = None,
-            lr_scheduler: optim.lr_scheduler._LRScheduler = None,
+            lr_scheduler: LRScheduler = None,
             output_base_path: str = None,
             script_path: str = None,
             settings_path: str = None,
-            resume_from: str = None,
-            check_log: int = 1,
-            check_val: int = 1,
-            check_test: int = 1,
-            check_model: int = 1,
+            checkpoint: dict = None,
             verbose: bool = False,
             device: torch.device = torch.device('cpu'),
+            train_generator: DataLoader = None,
+            val_generator: DataLoader = None,
+            test_generator: DataLoader = None,
+            epochs: int = 100,
+            clip_grad: float = 0.0,
             ):
         super(Trainer, self).__init__()
         
@@ -62,31 +65,26 @@ class Trainer(object):
         self.best_val_loss = torch.inf
         self.device = device
         self.multi_gpu = True if type(device) is list and len(device) > 1 else False
+        self.model.to(self.device[0])
+        if self.multi_gpu:
+            self.model = DataParallel(self.model, device_ids=self.device)
+        self.train_generator = train_generator
+        self.val_generator = val_generator
+        self.test_generator = test_generator
+        self.start_epoch = 0
+        self.start_step = 0
+        self.epochs = epochs
+        self.clip_grad = clip_grad
+        self.log = pd.DataFrame()
 
         # outputs
         self.make_subdirs(output_base_path, script_path, settings_path)
         self.verbose = verbose
 
         # checkpoints
-        self.check_log = check_log
-        self.check_val = check_val
-        self.check_test = check_test
-        self.check_model = check_model
-
-        # checkpoints
-        if resume_from is not None:
-            checkpoint = torch.load(os.path.join(resume_from, 'models', 'train_state.tar'))
-            self.start_epoch = checkpoint['epoch'] + 1
-            self.start_step = checkpoint['step'] + 1
-            self.model = checkpoint['model']
-            self.optimizer = checkpoint['optimizer']
-            self.lr_scheduler = checkpoint['scheduler']
-            self.best_val_loss = checkpoint['best_val_loss']
-            self.log = pd.read_csv(os.path.join(resume_from, 'log.csv'))
-        else:
-            self.start_epoch = 0
-            self.start_step = 0
-            self.log = pd.DataFrame()
+        self.check_log = checkpoint.get('check_log', 1)
+        self.check_val = checkpoint.get('check_val', 1)
+        self.check_test = checkpoint.get('check_test', 1)
         self.print_layers()
 
     def make_subdirs(self, output_base_path, script_path, settings_path):
@@ -102,6 +100,7 @@ class Trainer(object):
             output_path = os.path.join(output_base_path, f'training_{path_iter}')
         os.makedirs(output_path)
         self.output_path = output_path
+        print(f'Output directory: {output_path}')
 
         # create subdirectory for run scripts
         script_out = os.path.join(self.output_path, 'run_scripts')
@@ -116,6 +115,16 @@ class Trainer(object):
         # create subdirectory for models
         self.model_path = os.path.join(self.output_path, 'models')
         os.makedirs(self.model_path)
+
+    def resume(self, checkpoint):
+        train_state = torch.load(os.path.join(checkpoint, 'models', 'train_state.pt'))
+        self.start_epoch = train_state['epoch'] + 1
+        self.start_step = train_state['step']
+        self.model.load_state_dict(train_state['model_state_dict'])
+        self.optimizer.load_state_dict(train_state['optimizer_state_dict'])
+        self.lr_scheduler.load_state_dict(train_state['scheduler_state_dict'])
+        self.best_val_loss = train_state['best_val_loss']
+        self.log = pd.read_csv(os.path.join(checkpoint, 'log.csv'))
 
     def print_layers(self):
         print('Model:')
@@ -153,33 +162,21 @@ class Trainer(object):
         self.log = pd.concat([self.log, log], ignore_index=True)
         self.log.to_csv(os.path.join(self.output_path, 'log.csv'), index=False)
 
-    def train(
-            self,
-            train_generator,
-            val_generator,
-            test_generator,
-            epochs=100,
-            clip_grad=0,
-            ):
-        
-        self.model.to(self.device[0])
-        if self.multi_gpu:
-            self.model = nn.DataParallel(self.model, device_ids=self.device)                
-
+    def train(self):       
         step = self.start_step
-        for epoch in tqdm(range(self.start_epoch, epochs + 1)):
+        for epoch in tqdm(range(self.start_epoch, self.epochs)):
             train_log, val_log, test_log = {}, {}, {}
 
             # training
             self.model.train()
 
-            for train_batch in train_generator:
+            for train_batch in self.train_generator:
                 self.optimizer.zero_grad()
-                preds = self.model(train_batch.z, train_batch.pos, train_batch.edge_index, train_batch.batch)
+                preds = self.model(train_batch)
                 main_loss = self.main_loss(preds, train_batch)
                 main_loss.backward()
-                if clip_grad > 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
+                if self.clip_grad > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad)
                 self.optimizer.step()
                 main_loss = main_loss.detach().item()
                 eval_loss = self.eval_loss(preds, train_batch)
@@ -189,14 +186,14 @@ class Trainer(object):
                     train_log[f'train_{key}'] = train_log.get(f'train_{key}', 0.0) + value.detach().item()
                 step += 1
             for key, value in train_log.items():
-                train_log[key] /= len(train_generator)
+                train_log[key] /= len(self.train_generator)
 
             # validation
             if epoch % self.check_val == 0:
                 self.model.eval()
 
-                for val_batch in val_generator:
-                    preds = self.model(val_batch.z, val_batch.pos, val_batch.edge_index, val_batch.batch)
+                for val_batch in self.val_generator:
+                    preds = self.model(val_batch)
                     main_loss = self.main_loss(preds, val_batch)
                     val_log['val_loss'] = val_log.get('val_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, val_batch)
@@ -204,15 +201,15 @@ class Trainer(object):
                         val_log[f'val_{key}'] = val_log.get(f'val_{key}', 0.0) + value.detach().item()
 
                 for key, value in val_log.items():
-                    val_log[key] /= len(val_generator)
+                    val_log[key] /= len(self.val_generator)
                 wandb.log({'epoch': epoch, 'step': step} | val_log)
 
             # save test predictions
             if epoch % self.check_test == 0:
                 self.model.eval()
 
-                for test_batch in test_generator:
-                    preds = self.model(test_batch.z, test_batch.pos, test_batch.edge_index, test_batch.batch)
+                for test_batch in self.test_generator:
+                    preds = self.model(test_batch)
                     main_loss = self.main_loss(preds, test_batch)
                     test_log['test_loss'] = test_log.get('test_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, test_batch)
@@ -220,11 +217,11 @@ class Trainer(object):
                         test_log[f'test_{key}'] = test_log.get(f'test_{key}' + key, 0.0) + value.detach().item()
 
                 for key, value in test_log.items():
-                    test_log[key] /= len(test_generator)
+                    test_log[key] /= len(self.test_generator)
                 wandb.log({'epoch': epoch, 'step': step} | test_log)
 
             # best model
-            if epoch % self.check_model == 0:
+            if epoch % self.check_log == 0:
                 if val_log['val_loss'] < self.best_val_loss:
                     self.best_val_loss = val_log['val_loss']
                     if self.multi_gpu:
@@ -253,8 +250,8 @@ class Trainer(object):
                 torch.save({
                         'epoch': epoch,
                         'step': step,
-                        'model': self.model,
-                        'optimizer': self.optimizer,
-                        'scheduler': self.lr_scheduler,
+                        'model_state_dict': self.model.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'scheduler_state_dict': self.lr_scheduler.state_dict(),
                         'best_val_loss': self.best_val_loss,
-                    }, os.path.join(self.model_path, 'train_state.tar'))
+                    }, os.path.join(self.model_path, 'train_state.pt'))

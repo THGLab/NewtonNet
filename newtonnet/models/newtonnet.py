@@ -64,19 +64,22 @@ class NewtonNet(nn.Module):
         # device
         # self.to(device)
 
-    def forward(self, z, pos, edge_index, batch):
+    def forward(self, batch):
         '''
         Network forward pass
 
         Parameters:
-            z (torch.Tensor): The atomic numbers of the atoms in the molecule. Shape: (n_nodes, ).
-            pos (torch.Tensor): The positions of the atoms in the molecule. Shape: (n_nodes, 3).
-            edge_index (torch.Tensor): The edge index of the atoms in the molecule. Shape: (2, n_edges).
-            batch (torch.Tensor): The batch of the atoms in the molecule. Shape: (n_nodes, ).
+            batch: The input data.
+                z (torch.Tensor): The atomic numbers of the atoms in the molecule. Shape: (n_nodes, ).
+                pos (torch.Tensor): The positions of the atoms in the molecule. Shape: (n_nodes, 3).
+                edge_index (torch.Tensor): The edge index of the atoms in the molecule. Shape: (2, n_edges).
+                batch (torch.Tensor): The batch of the atoms in the molecule. Shape: (n_nodes, ).
 
         Returns:
             outputs (dict): The outputs of the network.
         '''
+        z, pos, edge_index, batch = batch.z, batch.pos, batch.edge_index, batch.batch
+        
         # initialize node and edge representations
         atom_node, force_node, disp_node, dir_edge, dist_edge = self.embedding_layer(z, pos, edge_index)
         # atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge = self.embedding_layer(z, pos, edge_index)
