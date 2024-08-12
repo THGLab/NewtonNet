@@ -41,10 +41,10 @@ class ScaleShift(nn.Module):
         if scale is None:
             self.scale = None
         elif scale.numel() == 1:
-            self.scale = nn.Parameter(scale * 100, requires_grad=True)
+            self.scale = nn.Parameter(scale, requires_grad=True)
         else:
             scale_dense = torch.zeros(self.z_max + 1)
-            scale_dense[z] = scale * 100
+            scale_dense[z] = scale
             self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1), freeze=False)
 
     def forward(self, input, z):
