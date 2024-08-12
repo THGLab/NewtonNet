@@ -260,3 +260,8 @@ class Trainer(object):
                         'best_val_loss': self.best_val_loss,
                         'rng_state': torch.get_rng_state(),
                     }, os.path.join(self.model_path, 'train_state.pt'))
+                
+            # early stopping
+            if isinstance(self.lr_scheduler, ReduceLROnPlateau):
+                if self.optimizer.param_groups[0]['lr'] <= self.lr_scheduler.min_lrs[0]:
+                    break
