@@ -29,13 +29,18 @@ class Trainer(object):
         output_base_path (str): The base path for the output directory.
         script_path (str): The path to the script that was used to start the training.
         settings_path (str): The path to the settings file that was used to start the training.
-        resume_from (str): The path to a checkpoint to resume training from. Default: False.
-        check_log (int): The interval in epochs for logging the training progress. Default: 1.
-        check_val (int): The interval in epochs for validation. Default: 1.
-        check_test (int): The interval in epochs for testing. Default: 1.
-        check_model (int): The interval in epochs for saving the model (must be validated first). Default: 1.
-        verbose (bool): Whether to print the training progress. Default: False.
+        checkpoint (dict): The checkpoint settings.
+            check_log (int): The interval in epochs for logging the training progress. Default: 1.
+            check_val (int): The interval in epochs for validation. Default: 1.
+            check_test (int): The interval in epochs for testing. Default: 1.
+            check_model (int): The interval in epochs for saving the model (must be validated first). Default: 1.
         device (torch.device): The device to use for training. Default: cpu
+        train_generator (DataLoader): The training data generator. Default: None.
+        val_generator (DataLoader): The validation data generator. Default: None.
+        test_generator (DataLoader): The test data generator. Default: None.
+        epochs (int): The number of epochs to train. Default: 100.
+        clip_grad (float): The gradient clipping value. Default: 0.0.
+        log_wandb (bool): Whether to use wandb for logging. Default: False.
     '''
     def __init__(
             self,
@@ -47,13 +52,13 @@ class Trainer(object):
             script_path: str = None,
             settings_path: str = None,
             checkpoint: dict = None,
-            verbose: bool = False,
             device: torch.device = torch.device('cpu'),
             train_generator: DataLoader = None,
             val_generator: DataLoader = None,
             test_generator: DataLoader = None,
             epochs: int = 100,
             clip_grad: float = 0.0,
+            log_wandb: bool = False,
             ):
         super(Trainer, self).__init__()
         
@@ -76,10 +81,10 @@ class Trainer(object):
         self.epochs = epochs
         self.clip_grad = clip_grad
         self.log = pd.DataFrame()
+        self.log_wandb = log_wandb
 
         # outputs
         self.make_subdirs(output_base_path, script_path, settings_path)
-        self.verbose = verbose
 
         # checkpoints
         self.check_log = checkpoint.get('check_log', 1)
@@ -174,7 +179,7 @@ class Trainer(object):
             for train_batch in self.train_generator:
                 self.optimizer.zero_grad()
                 # preds = self.model(train_batch)
-                preds = self.model(train_batch.z, train_batch.pos, train_batch.edge_index, train_batch.batch)
+                preds = self.model(train_batch.z, train_batch.disp, train_batch.edge_index, train_batch.batch)
                 main_loss = self.main_loss(preds, train_batch)
                 main_loss.backward()
                 if self.clip_grad > 0:
@@ -182,7 +187,8 @@ class Trainer(object):
                 self.optimizer.step()
                 main_loss = main_loss.detach().item()
                 eval_loss = self.eval_loss(preds, train_batch)
-                wandb.log({'epoch': epoch, 'step': step, 'train_loss': main_loss, 'lr': self.optimizer.param_groups[0]['lr']} | {f'train_{key}': value.detach().item() for key, value in eval_loss.items()})
+                if self.log_wandb:
+                    wandb.log({'epoch': epoch, 'step': step, 'train_loss': main_loss, 'lr': self.optimizer.param_groups[0]['lr']} | {f'train_{key}': value.detach().item() for key, value in eval_loss.items()})
                 train_log['train_loss'] = train_log.get('train_loss', 0.0) + main_loss
                 for key, value in eval_loss.items():
                     train_log[f'train_{key}'] = train_log.get(f'train_{key}', 0.0) + value.detach().item()
@@ -196,7 +202,7 @@ class Trainer(object):
 
                 for val_batch in self.val_generator:
                     # preds = self.model(val_batch)
-                    preds = self.model(val_batch.z, val_batch.pos, val_batch.edge_index, val_batch.batch)
+                    preds = self.model(val_batch.z, val_batch.disp, val_batch.edge_index, val_batch.batch)
                     main_loss = self.main_loss(preds, val_batch)
                     val_log['val_loss'] = val_log.get('val_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, val_batch)
@@ -205,7 +211,8 @@ class Trainer(object):
 
                 for key, value in val_log.items():
                     val_log[key] /= len(self.val_generator)
-                wandb.log({'epoch': epoch, 'step': step} | val_log)
+                if self.log_wandb:
+                    wandb.log({'epoch': epoch, 'step': step} | val_log)
 
             # save test predictions
             if epoch % self.check_test == 0:
@@ -213,7 +220,7 @@ class Trainer(object):
 
                 for test_batch in self.test_generator:
                     # preds = self.model(test_batch)
-                    preds = self.model(test_batch.z, test_batch.pos, test_batch.edge_index, test_batch.batch)
+                    preds = self.model(test_batch.z, test_batch.disp, test_batch.edge_index, test_batch.batch)
                     main_loss = self.main_loss(preds, test_batch)
                     test_log['test_loss'] = test_log.get('test_loss', 0.0) + main_loss.detach().item()
                     eval_loss = self.eval_loss(preds, test_batch)
@@ -222,7 +229,8 @@ class Trainer(object):
 
                 for key, value in test_log.items():
                     test_log[key] /= len(self.test_generator)
-                wandb.log({'epoch': epoch, 'step': step} | test_log)
+                if self.log_wandb:
+                    wandb.log({'epoch': epoch, 'step': step} | test_log)
 
             # best model
             if epoch % self.check_log == 0:
