@@ -46,7 +46,7 @@ class RadiusGraph(BaseTransform):
             flow=self.flow,
             num_workers=self.num_workers,
         )#.sort(dim=0)[0].unique(dim=1)
-        data.edge_attr = None
+        data.disp = data.pos[data.edge_index[0]] - data.pos[data.edge_index[1]]
 
         return data
 
