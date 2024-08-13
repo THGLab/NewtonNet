@@ -12,7 +12,7 @@ def get_output_by_string(key, n_features, activation, scalers):
     elif key == 'gradient_force':
         output_layer = GradientForceOutput()
     elif key == 'direct_force':
-        output_layer = DirectForceOutput(scalers['force'])
+        output_layer = DirectForceOutput(n_features, scalers['force'])
     # elif key == 'hessian':
     #     output_layer = SecondDerivativeProperty(
     #         dependent_property='forces',
@@ -27,12 +27,13 @@ def get_output_by_string(key, n_features, activation, scalers):
 
 
 class CustomOutputs:
-    def __init__(self, z, pos, batch, atom_node, force_node):
+    def __init__(self, z, disp, atom_node, force_node, edge_index, batch):
         self.z = z
-        self.pos = pos
-        self.batch = batch
+        self.disp = disp
         self.atom_node = atom_node
         self.force_node = force_node
+        self.edge_index = edge_index
+        self.batch = batch
 
 
 class DirectProperty(nn.Module):
@@ -84,11 +85,12 @@ class GradientForceOutput(FirstDerivativeProperty):
     def forward(self, outputs):
         force = -grad(
             outputs.energy, 
-            outputs.pos, 
+            outputs.disp, 
             grad_outputs=torch.ones_like(outputs.energy),
             create_graph=True, 
             retain_graph=True,
             )[0]
+        force = scatter(force, outputs.edge_index[0], dim=0, reduce='sum') - scatter(force, outputs.edge_index[1], dim=0, reduce='sum')
         outputs.gradient_force = force
         return outputs
     
@@ -96,12 +98,13 @@ class DirectForceOutput(DirectProperty):
     '''
     Direct force prediction
     '''
-    def __init__(self, scaler):
+    def __init__(self, n_features, scaler):
         super(DirectForceOutput, self).__init__()
+        self.layer = nn.Linear(n_features, 1, bias=False)
         self.scaler = scaler
 
     def forward(self, outputs):
-        force = outputs.force_node.sum(dim=-1)
+        force = self.layer(outputs.force_node).squeeze(dim=-1)
         force = self.scaler(force, outputs.z)
         outputs.direct_force = force
         return outputs

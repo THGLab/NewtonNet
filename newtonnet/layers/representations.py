@@ -4,7 +4,7 @@ from torch import nn
 
 def get_representation_by_string(cutoff, cutoff_network='poly', radial_network='bessel', n_basis=20):
     representations = {}
-    representations['scale'] = ScaledNorm(r=cutoff)
+    representations['norm'] = ScaledNorm(r=cutoff)
 
     if cutoff_network == 'poly':
         representations['cutoff'] = PolynomialCutoff(p=9)

@@ -121,6 +121,7 @@ trainer = Trainer(
     train_generator=train_gen,
     val_generator=val_gen,
     test_generator=test_gen,
+    log_wandb=wandb_kwargs is not None,
     **settings['training'],
     )
 if checkpoint is not None:
