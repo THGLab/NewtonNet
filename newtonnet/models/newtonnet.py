@@ -68,14 +68,14 @@ class NewtonNet(nn.Module):
         # self.to(device)
 
     # def forward(self, batch):
-    def forward(self, z, pos, edge_index, batch):
+    def forward(self, z, disp, edge_index, batch):
         '''
         Network forward pass
 
         Parameters:
             batch: The input data.
                 z (torch.Tensor): The atomic numbers of the atoms in the molecule. Shape: (n_nodes, ).
-                pos (torch.Tensor): The positions of the atoms in the molecule. Shape: (n_nodes, 3).
+                disp (torch.Tensor): The displacement vectors of the atoms in the molecule. Shape: (n_edges, 3).
                 edge_index (torch.Tensor): The edge index of the atoms in the molecule. Shape: (2, n_edges).
                 batch (torch.Tensor): The batch of the atoms in the molecule. Shape: (n_nodes, ).
 
@@ -85,7 +85,7 @@ class NewtonNet(nn.Module):
         # z, pos, edge_index, batch = batch.z, batch.pos, batch.edge_index, batch.batch
 
         # initialize node and edge representations
-        atom_node, force_node, disp_node, dir_edge, dist_edge = self.embedding_layer(z, pos, edge_index)
+        atom_node, force_node, disp_node, dir_edge, dist_edge = self.embedding_layer(z, disp)
         # atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge = self.embedding_layer(z, pos, edge_index)
 
         # compute interaction block and update atomic embeddings
@@ -94,7 +94,7 @@ class NewtonNet(nn.Module):
             # atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge, edge_index)
 
         # output net
-        outputs = CustomOutputs(z, pos, batch, atom_node, force_node)
+        outputs = CustomOutputs(z, disp, atom_node, force_node, edge_index, batch)
         for output_layer in self.output_layers:
             outputs = output_layer(outputs)
 
@@ -120,7 +120,7 @@ class EmbeddingNet(nn.Module):
         self.node_embedding = nn.Embedding(z_max + 1, n_features)
 
         # edge embedding
-        self.norm = representations['scale']
+        self.norm = representations['norm']
         self.cutoff = representations['cutoff']
         self.edge_embedding = representations['radial']
         self.n_basis = self.edge_embedding.n_basis
@@ -128,20 +128,20 @@ class EmbeddingNet(nn.Module):
         # requires dr
         self.requires_dr = False
 
-    def forward(self, z, pos, edge_index):
+    def forward(self, z, disp):
 
         # initialize node representations
         atom_node = self.node_embedding(z)  # n_nodes, n_features
-        force_node = torch.zeros(*pos.shape, self.n_features, dtype=pos.dtype, device=pos.device)  # n_nodes, 3, n_features
-        disp_node = torch.zeros(*pos.shape, self.n_features, dtype=pos.dtype, device=pos.device)  # n_nodes, 3, n_features
+        force_node = torch.zeros(z.size(0), 3, self.n_features, dtype=disp.dtype, device=disp.device)  # n_nodes, 3, n_features
+        disp_node = torch.zeros(z.size(0), 3, self.n_features, dtype=disp.dtype, device=disp.device)  # n_nodes, 3, n_features
 
         # recompute distances and distance vectors
         if self.requires_dr:
-            pos.requires_grad_()
-        disp_edge = pos[edge_index[0]] - pos[edge_index[1]]  # n_edges, 3
+            disp.requires_grad_()
+        # disp = pos[edge_index[0]] - pos[edge_index[1]]  # n_edges, 3
 
         # initialize edge representations
-        dist_edge, dir_edge = self.norm(disp_edge)  # n_edges, 1; n_edges, 3
+        dist_edge, dir_edge = self.norm(disp)  # n_edges, 1; n_edges, 3
         dist_edge = self.cutoff(dist_edge) * self.edge_embedding(dist_edge)  # n_edges, n_basis
         # cutoff_edge = self.cutoff(dist_edge)  # n_edges, 1
         # rbf_edge = self.edge_embedding(dist_edge)  # n_edges, n_basis

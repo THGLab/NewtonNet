@@ -4,6 +4,7 @@ from ase.neighborlist import neighbor_list
 from ase.calculators.calculator import Calculator
 
 import torch
+from torch_geometric.nn import radius_graph
 
 
 ##-------------------------------------
@@ -78,17 +79,26 @@ class MLAseCalculator(Calculator):
         pos = torch.tensor(atoms.positions, dtype=torch.float, device=self.device[0])
         try:
             edge_index = torch.tensor(atoms.edge_index, dtype=torch.long, device=self.device[0])
+            disp = torch.tensor(atoms.disp, dtype=torch.float, device=self.device[0])
+            print('using precomputed edge_index')
         except AttributeError:
-            edge_index = torch.tensor(
-                np.stack(neighbor_list('ij', atoms, cutoff=float(self.models[0].embedding_layer.norm.r))), 
-                dtype=torch.long, device=self.device[0])
+            # edge_index = torch.tensor(
+            #     np.stack(neighbor_list('ij', atoms, cutoff=float(self.models[0].embedding_layer.norm.r))), 
+            #     dtype=torch.long, device=self.device[0])
+            edge_index = radius_graph(
+                pos,
+                self.models[0].embedding_layer.norm.r,
+                max_num_neighbors=1024,
+            )
+            disp = pos[edge_index[0]] - pos[edge_index[1]]
+            print('using radius_graph')
         batch = torch.zeros_like(z, dtype=torch.long, device=self.device[0])
         for model_, model in enumerate(self.models):
-            pred = model(z, pos, edge_index, batch)
+            pred = model(z, disp, edge_index, batch)
             if 'energy' in self.properties:
                 preds['energy'][model_] = pred.energy.cpu().detach().numpy()
             if 'forces' in self.properties:
-                preds['forces'][model_] = pred.force.cpu().detach().numpy()
+                preds['forces'][model_] = pred.gradient_force.cpu().detach().numpy()
             del pred
 
         self.results['outlier'] = self.q_test(preds['energy'])
