@@ -2,6 +2,8 @@ import torch_geometric
 from torch_geometric.data import Data
 from torch_geometric.transforms import BaseTransform
 
+from torch_geometric.nn import radius_graph
+
 class RadiusGraph(BaseTransform):
     r"""Creates edges based on node positions :obj:`data.pos` to all points
     within a given distance (functional name: :obj:`radius_graph`).
@@ -37,7 +39,7 @@ class RadiusGraph(BaseTransform):
     def forward(self, data: Data) -> Data:
         assert data.pos is not None
 
-        data.edge_index = torch_geometric.nn.radius_graph(
+        data.edge_index = radius_graph(
             data.pos,
             self.r,
             data.batch,
