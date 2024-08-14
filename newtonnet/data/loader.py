@@ -6,6 +6,7 @@ from ase import units
 
 import numpy as np
 import torch
+import torch.nn as nn
 from torch_geometric.data import InMemoryDataset, Data
 from torch_geometric.utils import dense_to_sparse, scatter
 
@@ -36,6 +37,7 @@ class MolecularDataset(InMemoryDataset):
     ) -> None:
         if pre_transform is None:
             pre_transform = RadiusGraph(cutoff)
+        self.cutoff = cutoff
         self.precision = precision
         super().__init__(root, transform, pre_transform, pre_filter,
                          force_reload=force_reload)
@@ -57,12 +59,11 @@ class MolecularDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self) -> List[str]:
-        return ['data.pt', 'stats.json']
+        return ['data.pt']
 
     def process(self) -> None:
         data_list = []
         data_path = self.processed_paths[0]
-        stats_path = self.processed_paths[1]
         for raw_path in self.raw_paths:
             raw_data = np.load(raw_path)
 
@@ -85,49 +86,39 @@ class MolecularDataset(InMemoryDataset):
                 data_list.append(data)
 
         self.save(data_list, data_path)
-        self.save_stats(data_list, stats_path)
 
-    def save_stats(self, data_list: List[Data], stats_path: str) -> None:
-        z_list, formula_list = [], []
-        energy_list, force_list = [], []
-        node_count, edge_count = 0, 0
-        for data in data_list:
-            z_list.append(data.z)
-            formula_list.append(torch.bincount(data.z))
-            energy_list.append(data.energy)
-            force_list.append(data.force.norm(dim=-1))
-            node_count += data.z.size(0)
-            edge_count += data.edge_index.size(1)
+class MolecularStatistics(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
 
-        z = torch.cat(z_list, dim=0).long().cpu()
-        formula = torch.stack(formula_list, dim=0).float().cpu()
+    def forward(self, data):
+        z = data.z.long().cpu()
+        edge_index = data.edge_index.cpu()
+        batch = data.batch.cpu()
+        energy = data.energy.cpu()
+        force = data.force.norm(dim=-1).cpu()
+
+        z_max = z.max().item()
+        node_count = z.size(0)
+        edge_count = edge_index.size(1)
         neighbor_count = edge_count / node_count
-        energy = torch.cat(energy_list, dim=0).cpu()
-        force = torch.cat(force_list, dim=0).cpu()
+        formula = scatter(nn.functional.one_hot(z), batch, dim=0).float()
         energy_shifts = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
         energy_shifts[energy_shifts.abs() < 1e-12] = 0
         energy_scale = ((energy - torch.matmul(formula, energy_shifts)).square().sum() / (formula).sum()).sqrt()
-        # energy_scale = (energy - torch.matmul(formula, energy_shifts)).std()
         force_scale = scatter(force, z, reduce='mean')
+        force_scale[force_scale.abs() < 1e-12] = 0
 
-        with open(stats_path, 'w') as f:
-            z, energy_shift = dense_to_sparse(energy_shifts.unsqueeze(-1))
-            _, force_scale = dense_to_sparse(force_scale.unsqueeze(-1))
-            json.dump(
-                {
-                    'z': z[0].tolist(), 
-                    'average_neighbor_count': neighbor_count,
-                    'cutoff': self.pre_transform.r,
-                    'properties': {
-                        'energy': {
-                            'shift': energy_shift.tolist(), 
-                            'scale': energy_scale.item(),
-                        },
-                        'force': {
-                            'scale': force_scale.tolist(),
-                        },
-                    },
-                }, f)
-
-    def __repr__(self) -> str:
-        return f'{self.__class__.__name__}({len(self)})'
+        stats = {}
+        stats['z'] = z.unique()
+        stats['average_neighbor_count'] = neighbor_count
+        stats['properties'] = {
+            'energy': {
+                'shift': energy_shifts[:z_max+1],
+                'scale': energy_scale,
+            },
+            'force': {
+                'scale': force_scale[:z_max+1],
+            },
+        }
+        return stats

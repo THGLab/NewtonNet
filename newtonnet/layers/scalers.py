@@ -23,29 +23,26 @@ class ScaleShift(nn.Module):
     Node-level scale and shift layer.
     
     Parameters:
-        z (torch.Tensor): The atomic numbers of the atoms in the molecule.
         shift (torch.Tensor): The shift values for the properties.
         scale (torch.Tensor): The scale values for the properties.
     '''
-    def __init__(self, z, shift=None, scale=None):
+    def __init__(self, shift=None, scale=None):
         super(ScaleShift, self).__init__()
-        self.z_max = z.max().item()
+        self.z_max = 0
         if shift is None:
             self.shift = None
         elif shift.numel() == 1:
             self.shift = nn.Parameter(shift, requires_grad=True)
         else:
-            shift_dense = torch.zeros(self.z_max + 1)
-            shift_dense[z] = shift
-            self.shift = nn.Embedding.from_pretrained(shift_dense.reshape(-1, 1), freeze=False)
+            self.shift = nn.Embedding.from_pretrained(shift.reshape(-1, 1), freeze=False)
+            self.z_max = max(self.z_max, shift.size(0) - 1)
         if scale is None:
             self.scale = None
         elif scale.numel() == 1:
             self.scale = nn.Parameter(scale, requires_grad=True)
         else:
-            scale_dense = torch.zeros(self.z_max + 1)
-            scale_dense[z] = scale
-            self.scale = nn.Embedding.from_pretrained(scale_dense.reshape(-1, 1), freeze=False)
+            self.scale = nn.Embedding.from_pretrained(scale.reshape(-1, 1), freeze=False)
+            self.z_max = max(self.z_max, scale.size(0) - 1)
 
     def forward(self, input, z):
         '''
