@@ -8,7 +8,7 @@ from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
 # from torch_geometric.transforms import RadiusGraph
 
-from newtonnet.data import MolecularDataset
+from newtonnet.data import MolecularDataset, MolecularStatistics
 
 
 def parse_train_test(
@@ -76,19 +76,21 @@ def parse_train_test(
     print(f'batch size (train, val, test): {train_batch_size}, {val_batch_size}, {test_batch_size}')
 
     # extract data stats
-    stats_path = osp.join(train_root, 'processed', 'stats.json')
-    with open(stats_path, 'r') as f:
-        stats = json.load(f)
+    stats_calc = MolecularStatistics()
+    for train_batch in train_gen:
+        stats = stats_calc(train_batch)
+        break
+    stats['cutoff'] = train_data.dataset.cutoff
     print('stats:')
-    process_stats(stats)
+    print_stats(stats)
 
     return train_gen, val_gen, test_gen, stats
 
-def process_stats(stats, level=1):
+def print_stats(stats, level=1):
     for key, value in stats.items():
         if isinstance(value, dict):
             print('  ' * level + f'{key}:')
-            process_stats(value, level + 1)
+            print_stats(value, level + 1)
         else:
             print('  ' * level + f'{key}: {value}')
             stats[key] = torch.tensor(value)

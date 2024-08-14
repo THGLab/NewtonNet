@@ -77,7 +77,7 @@ train_gen, val_gen, test_gen, stats = parse_train_test(
     )
 
 # model
-scalers = {key: get_scaler_by_string(key, z=stats['z'], **stat) for key, stat in stats['properties'].items()}
+scalers = {key: get_scaler_by_string(key, **stat) for key, stat in stats['properties'].items()}
 represenations = get_representation_by_string(
     cutoff=stats['cutoff'], 
     **settings['model'].pop('representation', {}),
