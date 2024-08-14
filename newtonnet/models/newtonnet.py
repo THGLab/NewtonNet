@@ -16,6 +16,7 @@ class NewtonNet(nn.Module):
         n_features (int): Number of features in the latent layer. Default: 128.
         n_interactions (int): Number of message passing layers. Default: 3.
         activation (str): Activation function. Default: 'swish'.
+        layer_norm (bool): Whether to use layer normalization. Default: False.
         infer_properties (list): The properties to predict. Default: [].
         representations (dict): The distance transformation functions.
         scalers (nn.ModuleDict): The scalers for the chemical properties. Default: None.
@@ -26,6 +27,7 @@ class NewtonNet(nn.Module):
             n_features: int = 128,
             n_interactions: int = 3,
             activation: str = 'swish',
+            layer_norm: bool = False,
             infer_properties: list = [],
             representations: nn.Module = None,
             scalers: dict = None,
@@ -48,6 +50,7 @@ class NewtonNet(nn.Module):
                 n_features=n_features,
                 n_basis=self.embedding_layer.n_basis,
                 activation=activation,
+                layer_norm=layer_norm,
                 ) for _ in range(n_interactions)
             ])
 
@@ -158,8 +161,9 @@ class InteractionNet(nn.Module):
         n_features (int): Number of features in the hidden layer.
         n_basis (int): Number of radial basis functions.
         activation (nn.Module): Activation function.
+        layer_norm (bool): Whether to use layer normalization.
     '''
-    def __init__(self, n_features, n_basis, activation):
+    def __init__(self, n_features, n_basis, activation, layer_norm):
         super(InteractionNet, self).__init__()
 
         self.n_features = n_features
@@ -214,7 +218,11 @@ class InteractionNet(nn.Module):
         # )
         self.equiv_update = nn.Linear(n_features, n_features, bias=False)
 
-        # self.norm = nn.LayerNorm(n_features)
+        # layer norm
+        if layer_norm:
+            self.layer_norm = nn.LayerNorm(n_features)
+        else:
+            self.layer_norm = None
     
     def forward(self, atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index):
     # def forward(self, atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge, edge_index):
@@ -260,7 +268,8 @@ class InteractionNet(nn.Module):
         inv_update2 = torch.sum(force_node * self.equiv_update(force_node), dim=1)    # n_nodes, n_features
         atom_node = atom_node + inv_update2
 
-        # # layer norm
-        # atom_node = self.norm(atom_node)
+        # layer norm
+        if self.layer_norm is not None:
+            atom_node = self.layer_norm(atom_node)
 
         return atom_node, force_node, disp_node
