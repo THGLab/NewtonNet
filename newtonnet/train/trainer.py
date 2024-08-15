@@ -187,14 +187,16 @@ class Trainer(object):
                 self.optimizer.step()
                 main_loss = main_loss.detach().item()
                 eval_loss = self.eval_loss(preds, train_batch)
-                if self.log_wandb:
-                    wandb.log({'epoch': epoch, 'step': step, 'train_loss': main_loss, 'lr': self.optimizer.param_groups[0]['lr']} | {f'train_{key}': value.detach().item() for key, value in eval_loss.items()})
+                # if self.log_wandb:
+                #     wandb.log({'epoch': epoch, 'step': step, 'train_loss': main_loss, 'lr': self.optimizer.param_groups[0]['lr']} | {f'train_{key}': value.detach().item() for key, value in eval_loss.items()})
                 train_log['train_loss'] = train_log.get('train_loss', 0.0) + main_loss
                 for key, value in eval_loss.items():
                     train_log[f'train_{key}'] = train_log.get(f'train_{key}', 0.0) + value.detach().item()
                 step += 1
             for key, value in train_log.items():
                 train_log[key] /= len(self.train_generator)
+            if self.log_wandb:
+                wandb.log({'epoch': epoch, 'step': step, 'lr': self.optimizer.param_groups[0]['lr']} | train_log)
 
             # validation
             if epoch % self.check_val == 0:
