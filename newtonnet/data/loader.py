@@ -1,14 +1,13 @@
 import os
 import os.path as osp
+from tqdm import tqdm
 from typing import Callable, List, Optional, Union
-import json
-from ase import units
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch_geometric.data import InMemoryDataset, Data
-from torch_geometric.utils import dense_to_sparse, scatter
+from torch_geometric.utils import scatter
 
 from newtonnet.data import RadiusGraph
 
@@ -64,7 +63,7 @@ class MolecularDataset(InMemoryDataset):
     def process(self) -> None:
         data_list = []
         data_path = self.processed_paths[0]
-        for raw_path in self.raw_paths:
+        for raw_path in tqdm(self.raw_paths):
             raw_data = np.load(raw_path)
 
             z = torch.from_numpy(raw_data['Z']).int()
@@ -104,10 +103,10 @@ class MolecularStatistics(nn.Module):
         neighbor_count = edge_count / node_count
         formula = scatter(nn.functional.one_hot(z), batch, dim=0).float()
         energy_shifts = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
-        energy_shifts[energy_shifts.abs() < 1e-12] = 0
+        energy_shifts[energy_shifts.abs() < 1e-3] = 0
         energy_scale = ((energy - torch.matmul(formula, energy_shifts)).square().sum() / (formula).sum()).sqrt()
         force_scale = scatter(force, z, reduce='mean')
-        force_scale[force_scale.abs() < 1e-12] = 0
+        force_scale[force_scale.abs() < 1e-3] = 0
 
         stats = {}
         stats['z'] = z.unique()
