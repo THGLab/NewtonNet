@@ -93,5 +93,4 @@ def print_stats(stats, level=1):
             print_stats(value, level + 1)
         else:
             print('  ' * level + f'{key}: {value}')
-            stats[key] = torch.tensor(value)
     return stats
