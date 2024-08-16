@@ -68,16 +68,24 @@ class MolecularDataset(InMemoryDataset):
 
             z = torch.from_numpy(raw_data['Z']).int()
             pos = torch.from_numpy(raw_data['R']).to(self.precision)
-            energy = torch.from_numpy(raw_data['E']).to(self.precision)
-            force = torch.from_numpy(raw_data['F']).to(self.precision)
+            try:
+                energy = torch.from_numpy(raw_data['E']).to(self.precision)
+            except KeyError:
+                energy = None
+            try:
+                force = torch.from_numpy(raw_data['F']).to(self.precision)
+            except KeyError:
+                force = None
 
             for i in range(pos.size(0)):
-                data = Data(
-                    z=z.reshape(-1) if z.dim() < 2 else z[i].reshape(-1),
-                    pos=pos[i].reshape(-1, 3),
-                    energy=energy[i].reshape(-1),
-                    force=force[i].reshape(-1, 3),
-                    )
+                data = Data()
+                data.z = z.reshape(-1) if z.dim() < 2 else z[i].reshape(-1)
+                data.pos = pos[i].reshape(-1, 3)
+                if energy is not None:
+                    data.energy = energy[i].reshape(-1)
+                if force is not None:
+                    data.force = force[i].reshape(-1, 3)
+
                 if self.pre_filter is not None and not self.pre_filter(data):
                     continue
                 if self.pre_transform is not None:
@@ -91,33 +99,35 @@ class MolecularStatistics(nn.Module):
         super().__init__()
 
     def forward(self, data):
+        stats = {}
+
         z = data.z.long().cpu()
+        z_max = z.max().item()
+        stats['z'] = z.unique()
+
         edge_index = data.edge_index.cpu()
         batch = data.batch.cpu()
-        energy = data.energy.cpu()
-        force = data.force.norm(dim=-1).cpu()
-
-        z_max = z.max().item()
         node_count = z.size(0)
         edge_count = edge_index.size(1)
         neighbor_count = edge_count / node_count
-        formula = scatter(nn.functional.one_hot(z), batch, dim=0).float()
-        energy_shifts = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
-        energy_shifts[energy_shifts.abs() < 1e-3] = 0
-        energy_scale = ((energy - torch.matmul(formula, energy_shifts)).square().sum() / (formula).sum()).sqrt()
-        force_scale = scatter(force, z, reduce='mean')
-        force_scale[force_scale.abs() < 1e-3] = 0
-
-        stats = {}
-        stats['z'] = z.unique()
         stats['average_neighbor_count'] = neighbor_count
-        stats['properties'] = {
-            'energy': {
-                'shift': energy_shifts[:z_max+1],
-                'scale': energy_scale,
-            },
-            'force': {
-                'scale': force_scale[:z_max+1],
-            },
-        }
+
+        stats['properties'] = {}
+        try:
+            energy = data.energy.cpu()
+            formula = scatter(nn.functional.one_hot(z), batch, dim=0).float()
+            energy_shifts = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
+            energy_shifts[energy_shifts.abs() < 1e-3] = 0
+            energy_scale = ((energy - torch.matmul(formula, energy_shifts)).square().sum() / (formula).sum()).sqrt()
+            stats['properties']['energy'] = {'shift': energy_shifts, 'scale': energy_scale}
+        except AttributeError:
+            pass
+        try:
+            force = data.force.norm(dim=-1).cpu()
+            force_scale = scatter(force, z, reduce='mean')
+            force_scale[force_scale.abs() < 1e-3] = 0
+            stats['properties']['force'] = {'scale': force_scale}
+        except AttributeError:
+            pass
+
         return stats
