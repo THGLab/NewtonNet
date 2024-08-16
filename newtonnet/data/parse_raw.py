@@ -71,8 +71,8 @@ def parse_train_test(
 
     # create data loader
     train_gen = DataLoader(dataset=train_data, batch_size=train_batch_size, shuffle=True)
-    val_gen = DataLoader(dataset=val_data, batch_size=val_batch_size, shuffle=True)
-    test_gen = DataLoader(dataset=test_data, batch_size=test_batch_size, shuffle=False)
+    val_gen = DataLoader(dataset=val_data, batch_size=val_batch_size, shuffle=(len(val_data) > 0))
+    test_gen = DataLoader(dataset=test_data, batch_size=test_batch_size, shuffle=(len(test_data) > 0))
     print(f'batch size (train, val, test): {train_batch_size}, {val_batch_size}, {test_batch_size}')
 
     # extract data stats
