@@ -26,20 +26,11 @@ class MolecularDataset(InMemoryDataset):
     '''
     def __init__(
         self,
-        root: str,
-        transform: Optional[Callable] = None,
-        pre_transform: Optional[Callable] = None,
-        pre_filter: Optional[Callable] = None,
-        force_reload: bool = False,
-        cutoff: float = 5.0,
         precision: torch.dtype = torch.float,
+        **kwargs,
     ) -> None:
-        if pre_transform is None:
-            pre_transform = RadiusGraph(cutoff)
-        self.cutoff = cutoff
         self.precision = precision
-        super().__init__(root, transform, pre_transform, pre_filter,
-                         force_reload=force_reload)
+        super().__init__(**kwargs)
 
         self.load(self.processed_paths[0])
 
@@ -115,7 +106,7 @@ class MolecularStatistics(nn.Module):
         stats['properties'] = {}
         try:
             energy = data.energy.cpu()
-            formula = scatter(nn.functional.one_hot(z), batch, dim=0).float()
+            formula = scatter(nn.functional.one_hot(z), batch, dim=0).to(energy.dtype)
             energy_shifts = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
             energy_shifts[energy_shifts.abs() < 1e-3] = 0
             energy_scale = ((energy - torch.matmul(formula, energy_shifts)).square().sum() / (formula).sum()).sqrt()
