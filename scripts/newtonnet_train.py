@@ -65,13 +65,12 @@ else:
 
 # data
 torch.manual_seed(settings['general']['seed'])
-# pre_transform = Compose([
-#     RadiusGraph(settings['data'].get('cutoff', 5.0)),
-#     ToDevice(device[0]),
-#     ])
-# transform = None
-transform = ToDevice(device[0])
+transform = Compose([
+    RadiusGraph(settings['data'].pop('cutoff')),
+    ToDevice(device[0]),
+    ])
 train_gen, val_gen, test_gen, stats = parse_train_test(
+    precision=precision,
     transform=transform,
     **settings['data'],
     )
@@ -79,7 +78,7 @@ train_gen, val_gen, test_gen, stats = parse_train_test(
 # model
 scalers = {key: get_scaler_by_string(key, **stat) for key, stat in stats['properties'].items()}
 represenations = get_representation_by_string(
-    cutoff=stats['cutoff'], 
+    cutoff=transform.transforms[0].r, 
     **settings['model'].pop('representation', {}),
     )
 pretrained_model = settings['model'].pop('pretrained_model', None)

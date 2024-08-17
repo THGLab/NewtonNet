@@ -80,7 +80,7 @@ def parse_train_test(
     for train_batch in train_gen:
         stats = stats_calc(train_batch)
         break
-    stats['cutoff'] = train_data.dataset.cutoff
+    # stats['cutoff'] = train_data.dataset.cutoff
     print('stats:')
     print_stats(stats)
 
