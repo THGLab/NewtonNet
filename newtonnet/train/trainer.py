@@ -171,88 +171,49 @@ class Trainer(object):
     def train(self):       
         step = self.start_step
         for epoch in tqdm(range(self.start_epoch, self.epochs)):
-            train_log, val_log, test_log = {}, {}, {}
+            log_one_epoch = {'epoch': epoch, 'lr': self.optimizer.param_groups[0]['lr']}
 
             # training
             self.model.train()
-
-            for train_batch in self.train_generator:
-                self.optimizer.zero_grad()
-                # preds = self.model(train_batch)
-                preds = self.model(train_batch.z, train_batch.disp, train_batch.edge_index, train_batch.batch)
-                main_loss = self.main_loss(preds, train_batch)
-                main_loss.backward()
-                if self.clip_grad > 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad)
-                self.optimizer.step()
-                main_loss = main_loss.detach().item()
-                eval_loss = self.eval_loss(preds, train_batch)
-                # if self.log_wandb:
-                #     wandb.log({'epoch': epoch, 'step': step, 'train_loss': main_loss, 'lr': self.optimizer.param_groups[0]['lr']} | {f'train_{key}': value.detach().item() for key, value in eval_loss.items()})
-                train_log['train_loss'] = train_log.get('train_loss', 0.0) + main_loss
-                for key, value in eval_loss.items():
-                    train_log[f'train_{key}'] = train_log.get(f'train_{key}', 0.0) + value.detach().item()
-                step += 1
-            for key, value in train_log.items():
-                train_log[key] /= len(self.train_generator)
-            if self.log_wandb:
-                wandb.log({'epoch': epoch, 'step': step, 'lr': self.optimizer.param_groups[0]['lr']} | train_log)
+            train_log = self.run_one_epoch(self.train_generator, step=True)
+            step += len(self.train_generator)
+            log_one_epoch['step'] = step
+            log_one_epoch = log_one_epoch | {f'train_{key}': value for key, value in train_log.items()}
 
             # validation
             if epoch % self.check_val == 0:
                 self.model.eval()
-
-                for val_batch in self.val_generator:
-                    # preds = self.model(val_batch)
-                    preds = self.model(val_batch.z, val_batch.disp, val_batch.edge_index, val_batch.batch)
-                    main_loss = self.main_loss(preds, val_batch)
-                    val_log['val_loss'] = val_log.get('val_loss', 0.0) + main_loss.detach().item()
-                    eval_loss = self.eval_loss(preds, val_batch)
-                    for key, value in eval_loss.items():
-                        val_log[f'val_{key}'] = val_log.get(f'val_{key}', 0.0) + value.detach().item()
-
-                for key, value in val_log.items():
-                    val_log[key] /= len(self.val_generator)
-                if self.log_wandb:
-                    wandb.log({'epoch': epoch, 'step': step} | val_log)
+                val_log = self.run_one_epoch(self.val_generator, step=False)
+                log_one_epoch = log_one_epoch | {f'val_{key}': value for key, value in val_log.items()}
 
             # save test predictions
             if epoch % self.check_test == 0:
                 self.model.eval()
-
-                for test_batch in self.test_generator:
-                    # preds = self.model(test_batch)
-                    preds = self.model(test_batch.z, test_batch.disp, test_batch.edge_index, test_batch.batch)
-                    main_loss = self.main_loss(preds, test_batch)
-                    test_log['test_loss'] = test_log.get('test_loss', 0.0) + main_loss.detach().item()
-                    eval_loss = self.eval_loss(preds, test_batch)
-                    for key, value in eval_loss.items():
-                        test_log[f'test_{key}'] = test_log.get(f'test_{key}' + key, 0.0) + value.detach().item()
-
-                for key, value in test_log.items():
-                    test_log[key] /= len(self.test_generator)
-                if self.log_wandb:
-                    wandb.log({'epoch': epoch, 'step': step} | test_log)
+                test_log = self.run_one_epoch(self.test_generator, step=False)
+                log_one_epoch = log_one_epoch | {f'test_{key}': value for key, value in test_log.items()}
 
             # best model
             if epoch % self.check_log == 0:
-                if val_log['val_loss'] < self.best_val_loss:
-                    self.best_val_loss = val_log['val_loss']
+                if log_one_epoch['val_loss'] < self.best_val_loss:
+                    self.best_val_loss = log_one_epoch['val_loss']
                     if self.multi_gpu:
                         save_model = self.model.module
                     else:
                         save_model = self.model
                     torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
+                    log_one_epoch['save_model'] = True
 
             # plots
             if epoch % self.check_log == 0:
                 self.plot_grad_flow(epoch)
-            self.local_log({'epoch': epoch, 'step': step, 'lr': self.optimizer.param_groups[0]['lr']} | train_log | val_log | test_log)
+            self.local_log(log_one_epoch)
+            if self.log_wandb:
+                wandb.log(log_one_epoch)
 
             # learning rate decay
             if isinstance(self.lr_scheduler, ReduceLROnPlateau):
-                if 'val_loss' in val_log:
-                    self.lr_scheduler.step(val_log['val_loss'])
+                if 'val_loss' in log_one_epoch:
+                    self.lr_scheduler.step(log_one_epoch['val_loss'])
             elif isinstance(self.lr_scheduler, LRScheduler):
                 self.lr_scheduler.step()
 
@@ -274,3 +235,23 @@ class Trainer(object):
                 if isinstance(self.lr_scheduler, ReduceLROnPlateau):
                     if self.optimizer.param_groups[0]['lr'] <= self.lr_scheduler.min_lrs[0]:
                         break
+
+    def run_one_epoch(self, generator, step=False):
+        log_one_epoch = {}
+        for batch in generator:
+            if step:
+                self.optimizer.zero_grad()
+            # preds = self.model(batch)
+            preds = self.model(batch.z, batch.disp, batch.edge_index, batch.batch)
+            main_loss = self.main_loss(preds, batch)
+            eval_loss = self.eval_loss(preds, batch)
+            if step:
+                main_loss.backward()
+                if self.clip_grad > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad)
+                self.optimizer.step()
+            log_one_epoch['loss'] = log_one_epoch.get('train_loss', 0.0) + main_loss.detach().item()
+            for key, value in eval_loss.items():
+                log_one_epoch[key] = log_one_epoch.get(key, 0.0) + value.detach().item()
+        log_one_epoch = {key: value / len(generator) for key, value in log_one_epoch.items()}
+        return log_one_epoch
