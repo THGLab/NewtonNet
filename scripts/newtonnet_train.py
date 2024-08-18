@@ -55,6 +55,10 @@ settings_path = os.path.abspath(config)
 settings = yaml.safe_load(open(settings_path, 'r'))
 script_path = os.path.abspath(__file__)
 output_base_path = settings['general']['output']
+wandb_kwargs = settings['training'].pop('wandb', None)
+if wandb_kwargs is not None:
+    wandb.login()
+    wandb.init(**wandb_kwargs, config=settings)
 
 # device
 precision = get_precison_by_string(settings['general']['precision'])
@@ -104,10 +108,6 @@ lr_scheduler = settings['training'].pop('lr_scheduler', None).items()
 lr_scheduler = get_scheduler_by_string(lr_scheduler, optimizer)
 
 # training
-wandb_kwargs = settings['training'].pop('wandb', None)
-if wandb_kwargs is not None:
-    wandb.login()
-    wandb.init(**wandb_kwargs, config=settings)
 trainer = Trainer(
     model=model,
     loss_fns=(main_loss, eval_loss),
