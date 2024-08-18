@@ -250,7 +250,7 @@ class Trainer(object):
                 if self.clip_grad > 0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad)
                 self.optimizer.step()
-            log_one_epoch['loss'] = log_one_epoch.get('train_loss', 0.0) + main_loss.detach().item()
+            log_one_epoch['loss'] = log_one_epoch.get('loss', 0.0) + main_loss.detach().item()
             for key, value in eval_loss.items():
                 log_one_epoch[key] = log_one_epoch.get(key, 0.0) + value.detach().item()
         log_one_epoch = {key: value / len(generator) for key, value in log_one_epoch.items()}
