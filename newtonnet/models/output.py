@@ -12,7 +12,7 @@ def get_output_by_string(key, n_features, activation, scalers):
     elif key == 'gradient_force':
         output_layer = GradientForceOutput()
     elif key == 'direct_force':
-        output_layer = DirectForceOutput(n_features, scalers['force'])
+        output_layer = DirectForceOutput(n_features, activation, scalers['force'])
     # elif key == 'hessian':
     #     output_layer = SecondDerivativeProperty(
     #         dependent_property='forces',
@@ -98,13 +98,21 @@ class DirectForceOutput(DirectProperty):
     '''
     Direct force prediction
     '''
-    def __init__(self, n_features, scaler):
+    def __init__(self, n_features, activation, scaler):
         super(DirectForceOutput, self).__init__()
-        self.layer = nn.Linear(n_features, 1, bias=False)
+        self.layers = nn.Sequential(
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
+            )
         self.scaler = scaler
 
     def forward(self, outputs):
-        force = self.layer(outputs.force_node).squeeze(dim=-1)
+        coeff = self.layers(outputs.atom_node)  # n_nodes, n_features
+        force = coeff.unsqueeze(1) * outputs.force_node  # n_nodes, 3, n_features
+        force = force.sum(dim=-1)  # n_nodes, 3
         force = self.scaler(force, outputs.z)
         outputs.direct_force = force
         return outputs
