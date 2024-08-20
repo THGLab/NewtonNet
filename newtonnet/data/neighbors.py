@@ -1,4 +1,3 @@
-import torch_geometric
 from torch_geometric.data import Data
 from torch_geometric.transforms import BaseTransform
 

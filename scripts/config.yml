@@ -1,64 +1,65 @@
 general:
-  device: cpu                # The device to use. Default: 'cpu'.
-  output: /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/train_h2_test     # path and iterator for the output directory
-  precision: single          # Precision of the model. Default: 'single'.
+  # device: [cuda:0, cuda:1, cuda:2, cuda:3]
+  device: cuda
+  output: newtonnet_train
+  precision: double
+  seed: 0
 
 data:
-  train_path: /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/morse1.npz    # The path to the training data.
-  val_path:  /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/morse2.npz     # The path to the validation data. If None, use the training data. Default: None.
-  test_path:  /Users/ericyuan/Library/CloudStorage/GoogleDrive-ericyuan@berkeley.edu/My Drive/THG Lab/20230603_NewNewtonNet/morse3.npz    # The path to the test data. If None, use the validation data. Default: None.
-  train_properties: ['energy', 'forces']    # The properties to be trained. Default: [].
-  pbc: False                  # Whether to use periodic boundary. Default: False.
-  cell: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]    # Unit cell size. Default: [[0, 0, 0], [0, 0, 0], [0, 0, 0]].
-  cutoff: 5.0                 # The cutoff radius. Default: 5.0.
-  train_size: -1              # The size of the training set. If -1, use all data. Default: -1.
-  val_size: -1                # The size of the validation set. If -1, use all data. Default: -1.
-  test_size: -1               # The size of the test set. If -1, use all data. Default: -1.
-  random_states: 60           # Random seed for data splitting. Default: 42.
+  train_root: Data/rMD17/splits/rmd17_aspirin/split_01/train
+  # val_root: Data/rMD17/splits/rmd17_aspirin/split_01/test
+  test_root: Data/rMD17/splits/rmd17_aspirin/split_01/test
+  train_size: 950
+  val_size: null
+  test_size: null
+  train_batch_size: 10
+  val_batch_size: 1000
+  test_batch_size: 1000
+  cutoff: 5.0
+  force_reload: True
 
 model:
-  pretrained_model: null      # The path to the pre-trained model. If None, train from scratch. Default: None.
-  n_features: 32             # Number of features in the latent layer. Default: 128.
-  n_basis: 20                 # Number of radial basis functions for edge description. Default: 20.
-  cutoff_network: poly        # The cutoff function. Default: 'poly'.
-  n_interactions: 3           # Number of message passing layers. Default: 3.
-  share_interactions: False   # Whether to share the weights of the message passing layers. Default: False.
-  double_update_node: False   # Whether to update the invariant node twice in each message passing layer. Default: False.
-  layer_norm: False           # Whether to use layer normalization after message passing. Default: False.
-  activation: swish           # Activation function. Default: 'swish'.
-  infer_properties: ['energy', 'forces', 'hessian']    # The properties to predict. Default: [].
-  train_normalizer: False     # Whether the normalizers are trainable. Default: False.
-  dropout: 0.0                # Dropout between 0 and 1. Default: 0.0.
+  pretrained_model: null
+  representation:
+    cutoff_network: poly
+    radial_network: bessel
+    n_basis: 20
+  n_features: 128
+  n_interactions: 3
+  activation: swish
+  train_scaler: True
+  # infer_properties: ['energy', 'gradient_force', 'direct_force']
+  infer_properties: ['energy', 'gradient_force']
 
 training:
-  loss: 'energy/forces'       # The loss functions to use for training and evaluation. Default: None.
-  loss_kwargs:                # The keyword arguments for the loss function.
-    w_energy: 1.0             # The weight for the energy loss. Default: 0.0.
-    w_force: 0.0              # The weight for the force loss. Default: 0.0.
-    # wf_decay: 0.0             # The rate of exponential decay of force wight by training epoch
-    w_force_mag: 0.0              # The weight for the force magnitude loss. Default: 0.0.
-    w_force_dir: 0.0              # The weight for the force direction loss. Default: 0.0.
-  optimizer: 'adam'           # The optimizer to use for training. Default: 'adam'.
-  optimizer_kwargs:           # The keyword arguments for the optimizer.
-    lr: 1.0e-4                # The learning rate. Default: 1.0e-3.
-    weight_decay: 0.0         # The weight decay (L2 penalty). Default: 0.0.
-  lr_scheduler: 'plateau'     # The learning rate scheduler to use for training. Default: 'plateau'.
-  lr_scheduler_kwargs:        # The keyword arguments for the learning rate scheduler.
-    patience: 30              # Number of epochs with no improvement after which learning rate will be reduced. Default: 10.
-    factor: 0.7               # Factor by which the learning rate will be reduced. Default: 0.1.
-    min_lr: 1.0e-6            # The minimum learning rate. Default: 0.0.
-  epochs: 300                 # The number of training epochs. Default: 100.
-  dropout: 0.0                # Dropout between 0 and 1. Default: 0.0.
-  clip_grad: 0.0              # Clip the gradient norm to this value. If 0.0, do not clip the gradient. Default: 0.0.
-  train_batch_size: 10        # The batch size for training. Default: 32.
-  val_batch_size: 100         # The batch size for validation. Default: 32.
-  test_batch_size: 100        # The batch size for testing. Default: 32.
-
-checkpoint:
-  resume_training: null       # The path to the checkpoint to resume training. If None, train from scratch. Default: None.
-  log: 10                     # The interval in epochs for logging the training progress. Default: 1.
-  val: 1                      # The interval in epochs for validation. Default: 1.
-  test: 1000                  # The interval in epochs for testing. Default: 1.
-  model: 10                   # The interval in epochs for saving the model (must be validated first). Default: 1.
-  verbose: False              # Whether to print the training progress. Default: False.
+  # wandb:
+  #   project: NewtonNet
+  #   name: null
+  loss: 
+    energy:
+      weight: 1.0
+      mode: mse
+    gradient_force:
+      weight: 50.0
+      mode: mse
+    # direct_force:
+    #   weight: 0.0
+    #   mode: mse
+    #   transform: cos
+  optimizer: 
+    adam:
+      lr: 1.0e-3
+      weight_decay: 0.0
+      amsgrad: False
+  lr_scheduler: 
+    plateau:
+      patience: 15
+      factor: 0.7
+      min_lr: 1.0e-5
+  epochs: 10001
+  clip_grad: 0.0
+  checkpoint:
+    check_val: 1
+    check_test: 10
+    check_log: 10
 

@@ -3,8 +3,6 @@ from torch import nn
 from torch_geometric.utils import scatter
 
 from newtonnet.layers.activations import get_activation_by_string
-from newtonnet.layers.scalers import NullScaleShift
-from newtonnet.layers.representations import get_representation_by_string
 from newtonnet.models.output import get_output_by_string, CustomOutputs, FirstDerivativeProperty, SecondDerivativeProperty
 
 
@@ -66,9 +64,6 @@ class NewtonNet(nn.Module):
             #     dependent_property = output_layer.dependent_property
             #     assert dependent_property in self.output_layers.keys(), f'cannot find dependent property {dependent_property}'
             #     self.output_layers[dependent_property].requires_dr = True
-        
-        # device
-        # self.to(device)
 
     # def forward(self, batch):
     def forward(self, z, disp, edge_index, batch):
@@ -85,16 +80,13 @@ class NewtonNet(nn.Module):
         Returns:
             outputs (dict): The outputs of the network.
         '''
-        # z, pos, edge_index, batch = batch.z, batch.pos, batch.edge_index, batch.batch
 
         # initialize node and edge representations
         atom_node, force_node, disp_node, dir_edge, dist_edge = self.embedding_layer(z, disp)
-        # atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge = self.embedding_layer(z, pos, edge_index)
 
         # compute interaction block and update atomic embeddings
         for interaction_layer in self.interaction_layers:
             atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index)
-            # atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge, edge_index)
 
         # output net
         outputs = CustomOutputs(z, disp, atom_node, force_node, edge_index, batch)
@@ -141,13 +133,10 @@ class EmbeddingNet(nn.Module):
         # recompute distances and distance vectors
         if self.requires_dr:
             disp.requires_grad_()
-        # disp = pos[edge_index[0]] - pos[edge_index[1]]  # n_edges, 3
 
         # initialize edge representations
         dist_edge, dir_edge = self.norm(disp)  # n_edges, 1; n_edges, 3
         dist_edge = self.cutoff(dist_edge) * self.edge_embedding(dist_edge)  # n_edges, n_basis
-        # cutoff_edge = self.cutoff(dist_edge)  # n_edges, 1
-        # rbf_edge = self.edge_embedding(dist_edge)  # n_edges, n_basis
 
         return atom_node, force_node, disp_node, dir_edge, dist_edge
         # return atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge
@@ -196,7 +185,6 @@ class InteractionNet(nn.Module):
             self.layer_norm = None
     
     def forward(self, atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index):
-    # def forward(self, atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge, edge_index):
         # a
         message_nodepart = self.message_nodepart(atom_node)    # n_nodes, n_features
         message_edgepart = self.message_edgepart(dist_edge)    # n_edges, n_features
