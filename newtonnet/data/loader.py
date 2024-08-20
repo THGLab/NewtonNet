@@ -9,8 +9,6 @@ import torch.nn as nn
 from torch_geometric.data import InMemoryDataset, Data
 from torch_geometric.utils import scatter
 
-from newtonnet.data import RadiusGraph
-
 
 class MolecularDataset(InMemoryDataset):
     '''

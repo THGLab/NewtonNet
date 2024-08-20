@@ -1,12 +1,5 @@
-import os.path as osp
-import json
-
-import numpy as np
-import torch
-from torch import nn
 from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
-# from torch_geometric.transforms import RadiusGraph
 
 from newtonnet.data import MolecularDataset, MolecularStatistics
 

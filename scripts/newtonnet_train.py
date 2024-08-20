@@ -1,13 +1,9 @@
-#! /usr/bin/env python
-
 import os
 import argparse
 import yaml
-import json
 import wandb
 
 import torch
-from torch import nn
 from torch_geometric.transforms import ToDevice, Compose 
 
 from newtonnet.models import NewtonNet
@@ -15,7 +11,6 @@ from newtonnet.train import Trainer
 from newtonnet.data import RadiusGraph
 from newtonnet.data import parse_train_test
 from newtonnet.layers.precision import get_precison_by_string
-from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.representations import get_representation_by_string
 from newtonnet.layers.scalers import get_scaler_by_string
 from newtonnet.train.loss import get_loss_by_string

@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 import torch
-import time
 import shutil
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -9,12 +8,9 @@ import wandb
 
 import torch
 from torch import nn, optim
-from torch.optim import SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LRScheduler
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import DataParallel
-
-from newtonnet.train.loss import get_loss_by_string
 
 
 class Trainer(object):

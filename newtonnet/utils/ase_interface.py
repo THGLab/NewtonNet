@@ -1,6 +1,4 @@
 import numpy as np
-import ase, ase.units
-from ase.neighborlist import neighbor_list
 from ase.calculators.calculator import Calculator
 
 import torch
@@ -150,52 +148,4 @@ class MLAseCalculator(Calculator):
             else:
                 idx = None
         return idx
-
-
-# ##-------------------------------------
-# ##     ASE interface for Plumed calculator
-# ##--------------------------------------
-# class PlumedCalculator(Calculator):
-#     implemented_properties = ['energy', 'forces']  # , 'stress'
-#     def __init__(self, ase_plumed, **kwargs):
-#         Calculator.__init__(self, **kwargs)
-#         self.ase_plumed = ase_plumed
-#         self.counter = 0
-#         self.prev_force =None
-#         self.prev_energy = None
-
-#     def calculate(self, atoms=None, properties=['forces'],system_changes=None):
-#         super().calculate(atoms,properties,system_changes)
-#         forces = np.zeros((atoms.get_positions()).shape)
-#         energy = 0
-
-#         model_force = np.copy(forces)
-#         self.counter += 1
-#         # every step() call will call get_forces 2 times, only do plumed once(2nd) to make metadynamics work correctly
-#         # there is one call to get_forces when initialize
-#         # print(self.counter)
-#         # plumed_forces, plumed_energy = self.ase_plumed.external_forces(self.counter , new_forces=forces,
-#         #
-#         #                                                                delta_forces=True)
-#         if self.counter % 2 == 1:
-#             plumed_forces,plumed_energy = self.ase_plumed.external_forces((self.counter + 1) // 2 - 1, new_forces=forces,
-#                                                             new_energy=energy,delta_forces=True)
-#             self.prev_force = plumed_forces
-#             self.prev_energy = plumed_energy
-#             # print('force diff', np.sum(plumed_forces - model_force))
-#         else:
-#             plumed_forces = self.prev_force
-#             plumed_energy = self.prev_energy
-#             # print(self.counter)
-#         # if self.counter % 500 == 0:
-#         #     print('force diff', np.linalg.norm(plumed_forces - model_force))
-
-
-#         # delta energy and forces
-#         if 'energy' in properties:
-#             self.results['energy'] = plumed_energy
-#         if 'forces' in properties:
-#             self.results['forces'] = plumed_forces
-
-# if __name__ == '__main__':
-#     pass
+    
