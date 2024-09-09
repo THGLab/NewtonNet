@@ -3,16 +3,16 @@ from torch import nn
 from torch.autograd import grad
 from torch_geometric.utils import scatter
 
-from newtonnet.layers.scalers import NullScaleShift
+from newtonnet.layers.scalers import ScaleShift
 
 
-def get_output_by_string(key, n_features, activation, scalers):
+def get_output_by_string(key, n_features, activation):
     if key == 'energy':
-        output_layer = EnergyOutput(n_features, activation, scalers['energy'])
+        output_layer = EnergyOutput(n_features, activation)
     elif key == 'gradient_force':
         output_layer = GradientForceOutput()
     elif key == 'direct_force':
-        output_layer = DirectForceOutput(n_features, activation, scalers['force'])
+        output_layer = DirectForceOutput(n_features, activation)
     # elif key == 'hessian':
     #     output_layer = SecondDerivativeProperty(
     #         dependent_property='forces',
@@ -25,15 +25,24 @@ def get_output_by_string(key, n_features, activation, scalers):
         raise NotImplementedError(f'Output type {key} is not implemented yet')
     return output_layer
 
+def get_aggregator_by_string(key):
+    if key == 'energy':
+        aggregator = SumAggregator()
+    elif key == 'gradient_force':
+        aggregator = NullAggregator()
+    elif key == 'direct_force':
+        aggregator = NullAggregator()
+    # elif key == 'hessian':
+    #     aggregator = NullAggregator()
+    else:
+        raise NotImplementedError(f'Aggregate type {key} is not implemented yet')
+    return aggregator
 
-class CustomOutputs:
-    def __init__(self, z, disp, atom_node, force_node, edge_index, batch):
-        self.z = z
-        self.disp = disp
-        self.atom_node = atom_node
-        self.force_node = force_node
-        self.edge_index = edge_index
-        self.batch = batch
+
+class CustomOutputSet:
+    def __init__(self, **outputs):
+        for key, value in outputs.items():
+            setattr(self, key, value)
 
 
 class DirectProperty(nn.Module):
@@ -54,9 +63,8 @@ class EnergyOutput(DirectProperty):
     Parameters:
         n_features (int): Number of features in the hidden layer.
         activation (nn.Module): Activation function.
-        scaler (nn.Module): The normalizer for the atomic properties.
     '''
-    def __init__(self, n_features, activation, scaler):
+    def __init__(self, n_features, activation):
         super(EnergyOutput, self).__init__()
         self.layers = nn.Sequential(
             nn.Linear(n_features, n_features),
@@ -65,14 +73,12 @@ class EnergyOutput(DirectProperty):
             activation,
             nn.Linear(n_features, 1),
             )
-        self.scaler = scaler
 
     def forward(self, outputs):
         energy = self.layers(outputs.atom_node)
-        energy = self.scaler(energy, outputs.z)
-        energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
-        outputs.energy = energy
-        return outputs
+        # energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
+        # outputs.energy = energy
+        return energy
 
 class GradientForceOutput(FirstDerivativeProperty):
     '''
@@ -80,7 +86,6 @@ class GradientForceOutput(FirstDerivativeProperty):
     '''
     def __init__(self):
         super(GradientForceOutput, self).__init__()
-        self.scaler = NullScaleShift()
 
     def forward(self, outputs):
         force = -grad(
@@ -91,14 +96,14 @@ class GradientForceOutput(FirstDerivativeProperty):
             retain_graph=True,
             )[0]
         force = scatter(force, outputs.edge_index[0], dim=0, reduce='sum') - scatter(force, outputs.edge_index[1], dim=0, reduce='sum')
-        outputs.gradient_force = force
-        return outputs
+        # outputs.gradient_force = force
+        return force
     
 class DirectForceOutput(DirectProperty):
     '''
     Direct force prediction
     '''
-    def __init__(self, n_features, activation, scaler):
+    def __init__(self, n_features, activation):
         super(DirectForceOutput, self).__init__()
         self.layers = nn.Sequential(
             nn.Linear(n_features, n_features),
@@ -107,12 +112,24 @@ class DirectForceOutput(DirectProperty):
             activation,
             nn.Linear(n_features, n_features),
             )
-        self.scaler = scaler
 
     def forward(self, outputs):
-        coeff = self.layers(outputs.atom_node)  # n_nodes, n_features
-        force = coeff.unsqueeze(1) * outputs.force_node  # n_nodes, 3, n_features
+        force = self.layers(outputs.atom_node).unsqueeze(1) * outputs.force_node  # n_nodes, 3, n_features
         force = force.sum(dim=-1)  # n_nodes, 3
-        force = self.scaler(force, outputs.z)
-        outputs.direct_force = force
-        return outputs
+        # outputs.direct_force = force
+        return force
+    
+
+class SumAggregator(nn.Module):
+    def __init__(self):
+        super(SumAggregator, self).__init__()
+
+    def forward(self, output, outputs):
+        return scatter(output, outputs.batch, dim=0, reduce='sum').reshape(-1)
+
+class NullAggregator(nn.Module):
+    def __init__(self):
+        super(NullAggregator, self).__init__()
+
+    def forward(self, output, outputs):
+        return output

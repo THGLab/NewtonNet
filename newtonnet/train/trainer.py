@@ -47,7 +47,7 @@ class Trainer(object):
             output_base_path: str = None,
             script_path: str = None,
             settings_path: str = None,
-            checkpoint: dict = None,
+            checkpoint: dict = {},
             device: torch.device = torch.device('cpu'),
             train_generator: DataLoader = None,
             val_generator: DataLoader = None,
@@ -80,7 +80,12 @@ class Trainer(object):
         self.log_wandb = log_wandb
 
         # outputs
-        self.make_subdirs(output_base_path, script_path, settings_path)
+        if output_base_path is not None:
+            self.make_subdirs(output_base_path, script_path, settings_path)
+        else:
+            self.output_path = None
+            self.graph_path = None
+            self.model_path = None
 
         # checkpoints
         self.check_log = checkpoint.get('check_log', 1)
@@ -177,19 +182,19 @@ class Trainer(object):
             log_one_epoch = log_one_epoch | {f'train_{key}': value for key, value in train_log.items()}
 
             # validation
-            if epoch % self.check_val == 0:
+            if epoch % self.check_val == 0 and self.val_generator is not None:
                 self.model.eval()
                 val_log = self.run_one_epoch(self.val_generator, step=False)
                 log_one_epoch = log_one_epoch | {f'val_{key}': value for key, value in val_log.items()}
 
             # save test predictions
-            if epoch % self.check_test == 0:
+            if epoch % self.check_test == 0 and self.test_generator is not None:
                 self.model.eval()
                 test_log = self.run_one_epoch(self.test_generator, step=False)
                 log_one_epoch = log_one_epoch | {f'test_{key}': value for key, value in test_log.items()}
 
             # best model
-            if epoch % self.check_log == 0:
+            if epoch % self.check_log == 0 and self.model_path is not None:
                 if log_one_epoch['val_loss'] < self.best_val_loss:
                     self.best_val_loss = log_one_epoch['val_loss']
                     if self.multi_gpu:
@@ -200,9 +205,10 @@ class Trainer(object):
                     log_one_epoch['save_model'] = True
 
             # plots
-            if epoch % self.check_log == 0:
+            if epoch % self.check_log == 0 and self.graph_path is not None:
                 self.plot_grad_flow(epoch)
-            self.local_log(log_one_epoch)
+            if self.output_path is not None:
+                self.local_log(log_one_epoch)
             if self.log_wandb:
                 wandb.log(log_one_epoch)
 
@@ -217,13 +223,13 @@ class Trainer(object):
             # self.main_loss.force_loss_decay()
 
             # checkpoint
-            if epoch % self.check_log == 0:
+            if epoch % self.check_log == 0 and self.model_path is not None:
                 torch.save({
                         'epoch': epoch,
                         'step': step,
                         'model_state_dict': self.model.state_dict(),
                         'optimizer_state_dict': self.optimizer.state_dict(),
-                        'scheduler_state_dict': self.lr_scheduler.state_dict(),
+                        'scheduler_state_dict': self.lr_scheduler.state_dict() if self.lr_scheduler is not None else None,
                         'best_val_loss': self.best_val_loss,
                         'rng_state': torch.get_rng_state(),
                     }, os.path.join(self.model_path, 'train_state.pt'))

@@ -3,7 +3,9 @@ from torch import nn
 from torch_geometric.utils import scatter
 
 from newtonnet.layers.activations import get_activation_by_string
-from newtonnet.models.output import get_output_by_string, CustomOutputs, FirstDerivativeProperty, SecondDerivativeProperty
+from newtonnet.layers.scalers import get_scaler_by_string
+from newtonnet.models.output import get_output_by_string, get_aggregator_by_string
+from newtonnet.models.output import CustomOutputSet, FirstDerivativeProperty, SecondDerivativeProperty
 
 
 class NewtonNet(nn.Module):
@@ -17,8 +19,6 @@ class NewtonNet(nn.Module):
         layer_norm (bool): Whether to use layer normalization. Default: False.
         infer_properties (list): The properties to predict. Default: [].
         representations (dict): The distance transformation functions.
-        scalers (nn.ModuleDict): The scalers for the chemical properties. Default: None.
-        train_scalers (bool): Whether to train the scalers. Default: False.
     '''
     def __init__(
             self,
@@ -28,8 +28,6 @@ class NewtonNet(nn.Module):
             layer_norm: bool = False,
             infer_properties: list = [],
             representations: nn.Module = None,
-            scalers: dict = None,
-            train_scaler: bool = False,
     ) -> None:
 
         super(NewtonNet, self).__init__()
@@ -38,7 +36,6 @@ class NewtonNet(nn.Module):
         # embedding layer
         self.embedding_layer = EmbeddingNet(
             n_features=n_features,
-            z_max=max([scaler.z_max for scaler in scalers.values()]) if scalers else 128,
             representations=representations,
             )
 
@@ -53,10 +50,12 @@ class NewtonNet(nn.Module):
             ])
 
         # final output layer
+        self.infer_properties = infer_properties
         self.output_layers = nn.ModuleList()
-        for key in infer_properties:
-            output_layer = get_output_by_string(key, n_features, activation, scalers)
-            output_layer.scaler.requires_grad_(train_scaler)
+        self.scalers = nn.ModuleList()
+        self.aggregators = nn.ModuleList()
+        for key in self.infer_properties:
+            output_layer = get_output_by_string(key, n_features, activation)
             self.output_layers.append(output_layer)
             if isinstance(output_layer, FirstDerivativeProperty):
                 self.embedding_layer.requires_dr = True
@@ -64,6 +63,11 @@ class NewtonNet(nn.Module):
             #     dependent_property = output_layer.dependent_property
             #     assert dependent_property in self.output_layers.keys(), f'cannot find dependent property {dependent_property}'
             #     self.output_layers[dependent_property].requires_dr = True
+            scaler = get_scaler_by_string(key)
+            self.scalers.append(scaler)
+            aggregator = get_aggregator_by_string(key)
+            self.aggregators.append(aggregator)
+
 
     # def forward(self, batch):
     def forward(self, z, disp, edge_index, batch):
@@ -89,9 +93,12 @@ class NewtonNet(nn.Module):
             atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index)
 
         # output net
-        outputs = CustomOutputs(z, disp, atom_node, force_node, edge_index, batch)
-        for output_layer in self.output_layers:
-            outputs = output_layer(outputs)
+        outputs = CustomOutputSet(z=z, disp=disp, atom_node=atom_node, force_node=force_node, edge_index=edge_index, batch=batch)
+        for key, output_layer, scaler, aggregator in zip(self.infer_properties, self.output_layers, self.scalers, self.aggregators):
+            output = output_layer(outputs)
+            output = scaler(output, outputs)
+            output = aggregator(output, outputs)
+            setattr(outputs, key, output)
 
         return outputs
 
@@ -103,16 +110,15 @@ class EmbeddingNet(nn.Module):
 
     Parameters:
         n_features (int): Number of features in the hidden layer.
-        z_max (int): Maximum atomic number.
         representations (dict): The distance transformation functions.
     '''
-    def __init__(self, n_features, z_max, representations):
+    def __init__(self, n_features, representations):
 
         super(EmbeddingNet, self).__init__()
 
         # atomic embedding
         self.n_features = n_features
-        self.node_embedding = nn.Embedding(z_max + 1, n_features)
+        self.node_embedding = nn.Embedding(118 + 1, n_features, padding_idx=0)
 
         # edge embedding
         self.norm = representations['norm']
@@ -132,7 +138,7 @@ class EmbeddingNet(nn.Module):
 
         # recompute distances and distance vectors
         if self.requires_dr:
-            disp.requires_grad_()
+            disp.requires_grad = True
 
         # initialize edge representations
         dist_edge, dir_edge = self.norm(disp)  # n_edges, 1; n_edges, 3
