@@ -64,7 +64,7 @@ class BaseLoss(nn.Module):
             'cos': 1 - cosine similarity.
             'norm': Norm.
     '''
-    def __init__(self, mode: str, weight: float = 1, transform: str = None, **kwargs):
+    def __init__(self, mode: str = 'mse', weight: float = 1, transform: str = None, **kwargs):
         super(BaseLoss, self).__init__()
         self.weight = weight
         self.mode = mode

@@ -1,16 +1,21 @@
+from tqdm import tqdm
+
+import torch
 from torch.utils.data import random_split
 from torch_geometric.loader import DataLoader
 
-from newtonnet.data import MolecularDataset, MolecularStatistics
+from newtonnet.data import MolecularStatistics
 
 
 def parse_train_test(
+        in_memory: bool = True,
         train_root: str = None,
         val_root: str = None,
         test_root: str = None,
         train_size: int = None,
         val_size: int = None,
         test_size: int = None,
+        stats_size: int = None,
         train_batch_size: int = 32,
         val_batch_size: int = 32,
         test_batch_size: int = 32,
@@ -20,6 +25,7 @@ def parse_train_test(
     Parse the training, validation, and test data.
 
     Args:
+        in_memory (bool): Whether to load the data in memory. Default: True.
         train_path (str): The path to the training data.
         val_path (str): The path to the validation data. If None, split from the unused training data. Default: None.
         test_path (str): The path to the test data. If None, split from the unused validation data. Default: None.
@@ -29,6 +35,7 @@ def parse_train_test(
         train_batch_size (int): The batch size for training. Default: 32.
         val_batch_size (int): The batch size for validation. Default: 32.
         test_batch_size (int): The batch size for testing. Default: 32.
+        stats_batch_size (int): The batch size for statistics calculation. Default: 32.
         dataset_kwargs (dict): The keyword arguments for MolecularDataset.
 
     Returns:
@@ -36,6 +43,11 @@ def parse_train_test(
         val_gen (torch.utils.data.DataLoader): The validation data loader.
         test_gen (torch.utils.data.DataLoader): The test data loader.
     '''
+    # define dataset type
+    if in_memory:
+        from newtonnet.data import MolecularInMemoryDataset as MolecularDataset
+    else:
+        from newtonnet.data import MolecularDataset
 
     # load data
     print('Data:')
@@ -66,24 +78,45 @@ def parse_train_test(
     train_gen = DataLoader(dataset=train_data, batch_size=train_batch_size, shuffle=True)
     val_gen = DataLoader(dataset=val_data, batch_size=val_batch_size, shuffle=(len(val_data) > 0))
     test_gen = DataLoader(dataset=test_data, batch_size=test_batch_size, shuffle=(len(test_data) > 0))
+    stats_gen = DataLoader(dataset=train_data, batch_size=stats_size if stats_size is not None else len(train_data), shuffle=True)
     print(f'batch size (train, val, test): {train_batch_size}, {val_batch_size}, {test_batch_size}')
 
     # extract data stats
     stats_calc = MolecularStatistics()
-    for train_batch in train_gen:
-        stats = stats_calc(train_batch)
+    for batch in stats_gen:
+        stats = stats_calc(batch)
         break
-    # stats['cutoff'] = train_data.dataset.cutoff
-    print('stats:')
-    print_stats(stats)
+    # print('stats:')
+    # print_stats(stats)
 
     return train_gen, val_gen, test_gen, stats
 
-def print_stats(stats, level=1):
-    for key, value in stats.items():
-        if isinstance(value, dict):
-            print('  ' * level + f'{key}:')
-            print_stats(value, level + 1)
-        else:
-            print('  ' * level + f'{key}: {value}')
-    return stats
+# def process_stats(stats_raw):
+#     stats = {'z': [], 'properties': {}}
+#     for stat in stats_raw:
+#         stats['z'].append(stat['z'])
+#         for prop, prop_dict in stat['properties'].items():  # prop: 'energy', 'force', etc
+#             if prop not in stats['properties']:
+#                 stats['properties'][prop] = {}
+#             for key, value in prop_dict.items():  # key: 'scale', 'shift'
+#                 if key not in stats['properties'][prop]:
+#                     stats['properties'][prop][key] = []
+#                 if value.ndim > 0:
+#                     value_dense = torch.full((129, ), torch.nan, dtype=value.dtype)
+#                     value_dense[stat['z']] = value
+#                     value = value_dense
+#                 stats['properties'][prop][key].append(value)
+#     stats['z'] = torch.cat(stats['z']).unique()
+#     for prop, prop_dict in stats['properties'].items():
+#         for key, value in prop_dict.items():
+#             stats['properties'][prop][key] = torch.stack(value).nanmean(dim=0).nan_to_num()
+#     return stats
+
+# def print_stats(stats, level=1):
+#     for key, value in stats.items():
+#         if isinstance(value, dict):
+#             print('  ' * level + f'{key}:')
+#             print_stats(value, level + 1)
+#         else:
+#             print('  ' * level + f'{key}: {value[value != 0]}')
+#     return stats
