@@ -78,7 +78,7 @@ class MLAseCalculator(Calculator):
         try:
             edge_index = torch.tensor(atoms.edge_index, dtype=torch.long, device=self.device[0])
             disp = torch.tensor(atoms.disp, dtype=torch.float, device=self.device[0])
-            print('using precomputed edge_index')
+            # print('using precomputed edge_index')
         except AttributeError:
             # edge_index = torch.tensor(
             #     np.stack(neighbor_list('ij', atoms, cutoff=float(self.models[0].embedding_layer.norm.r))), 
@@ -89,7 +89,7 @@ class MLAseCalculator(Calculator):
                 max_num_neighbors=1024,
             )
             disp = pos[edge_index[0]] - pos[edge_index[1]]
-            print('using radius_graph')
+            # print('using radius_graph')
         batch = torch.zeros_like(z, dtype=torch.long, device=self.device[0])
         for model_, model in enumerate(self.models):
             pred = model(z, disp, edge_index, batch)
