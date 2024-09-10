@@ -6,6 +6,7 @@ from torch_geometric.utils import scatter
 from newtonnet.layers.scalers import ScaleShift
 
 
+
 def get_output_by_string(key, n_features, activation):
     if key == 'energy':
         output_layer = EnergyOutput(n_features, activation)
@@ -95,7 +96,8 @@ class GradientForceOutput(FirstDerivativeProperty):
             create_graph=True, 
             retain_graph=True,
             )[0]
-        force = scatter(force, outputs.edge_index[0], dim=0, reduce='sum') - scatter(force, outputs.edge_index[1], dim=0, reduce='sum')
+        force = scatter(force, outputs.edge_index[0], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0)) - \
+            scatter(force, outputs.edge_index[1], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0))
         # outputs.gradient_force = force
         return force
     
