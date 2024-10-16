@@ -5,7 +5,7 @@ from torch_geometric.utils import scatter
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.scalers import get_scaler_by_string
 from newtonnet.models.output import get_output_by_string, get_aggregator_by_string
-from newtonnet.models.output import CustomOutputSet, FirstDerivativeProperty, SecondDerivativeProperty
+from newtonnet.models.output import CustomOutputSet, DerivativeProperty
 
 
 class NewtonNet(nn.Module):
@@ -57,12 +57,8 @@ class NewtonNet(nn.Module):
         for key in self.infer_properties:
             output_layer = get_output_by_string(key, n_features, activation)
             self.output_layers.append(output_layer)
-            if isinstance(output_layer, FirstDerivativeProperty):
+            if isinstance(output_layer, DerivativeProperty):
                 self.embedding_layer.requires_dr = True
-            # if isinstance(output_layer, SecondDerivativeProperty):
-            #     dependent_property = output_layer.dependent_property
-            #     assert dependent_property in self.output_layers.keys(), f'cannot find dependent property {dependent_property}'
-            #     self.output_layers[dependent_property].requires_dr = True
             scaler = get_scaler_by_string(key)
             self.scalers.append(scaler)
             aggregator = get_aggregator_by_string(key)

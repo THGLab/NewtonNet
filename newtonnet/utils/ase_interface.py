@@ -7,7 +7,7 @@ from torch_geometric.nn import radius_graph
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.scalers import get_scaler_by_string
 from newtonnet.models.output import get_output_by_string, get_aggregator_by_string
-from newtonnet.models.output import CustomOutputSet, FirstDerivativeProperty, SecondDerivativeProperty
+from newtonnet.models.output import CustomOutputSet, DerivativeProperty
 
 
 ##-------------------------------------
@@ -61,12 +61,8 @@ class MLAseCalculator(Calculator):
                 model.infer_properties.append(key)
                 output_layer = get_output_by_string(key)
                 model.output_layers.append(output_layer)
-                if isinstance(output_layer, FirstDerivativeProperty):
+                if isinstance(output_layer, DerivativeProperty):
                     model.embedding_layer.requires_dr = True
-                # if isinstance(output_layer, SecondDerivativeProperty):
-                #     dependent_property = output_layer.dependent_property
-                #     assert dependent_property in self.output_layers.keys(), f'cannot find dependent property {dependent_property}'
-                #     self.output_layers[dependent_property].requires_dr = True
                 scaler = get_scaler_by_string(key)
                 model.scalers.append(scaler)
                 aggregator = get_aggregator_by_string(key)
@@ -86,6 +82,8 @@ class MLAseCalculator(Calculator):
             preds['energy'] = np.zeros(len(self.models))
         if 'forces' in self.properties:
             preds['forces'] = np.zeros((len(self.models), len(atoms), 3))
+        if 'hessian' in self.properties:
+            preds['hessian'] = np.zeros((len(self.models), len(atoms), 3, len(atoms), 3))
         z = torch.tensor(atoms.numbers, dtype=torch.long, device=self.device[0])
         pos = torch.tensor(atoms.positions, dtype=torch.float, device=self.device[0])
         try:
@@ -110,6 +108,8 @@ class MLAseCalculator(Calculator):
                 preds['energy'][model_] = pred.energy.cpu().detach().numpy()
             if 'forces' in self.properties:
                 preds['forces'][model_] = pred.gradient_force.cpu().detach().numpy()
+            if 'hessian' in self.properties:
+                preds['hessian'][model_] = pred.hessian.cpu().detach().numpy()
             del pred
 
         self.results['outlier'] = self.q_test(preds['energy'])
