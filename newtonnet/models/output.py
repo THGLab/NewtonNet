@@ -7,21 +7,15 @@ from newtonnet.layers.scalers import ScaleShift
 
 
 
-def get_output_by_string(key, n_features, activation):
+def get_output_by_string(key, n_features=None, activation=None):
     if key == 'energy':
         output_layer = EnergyOutput(n_features, activation)
     elif key == 'gradient_force':
         output_layer = GradientForceOutput()
     elif key == 'direct_force':
         output_layer = DirectForceOutput(n_features, activation)
-    # elif key == 'hessian':
-    #     output_layer = SecondDerivativeProperty(
-    #         dependent_property='forces',
-    #         independent_property='positions',
-    #         negate=True,
-    #         scaler=scaler,
-    #         **kwargs,
-    #         )
+    elif key == 'hessian':
+        output_layer = HessianOutput()
     else:
         raise NotImplementedError(f'Output type {key} is not implemented yet')
     return output_layer
@@ -33,8 +27,8 @@ def get_aggregator_by_string(key):
         aggregator = NullAggregator()
     elif key == 'direct_force':
         aggregator = NullAggregator()
-    # elif key == 'hessian':
-    #     aggregator = NullAggregator()
+    elif key == 'hessian':
+        aggregator = NullAggregator()
     else:
         raise NotImplementedError(f'Aggregate type {key} is not implemented yet')
     return aggregator
@@ -49,12 +43,9 @@ class CustomOutputSet:
 class DirectProperty(nn.Module):
     def __init__(self):
         super(DirectProperty, self).__init__()
-class FirstDerivativeProperty(nn.Module):
+class DerivativeProperty(nn.Module):
     def __init__(self):
-        super(FirstDerivativeProperty, self).__init__()
-class SecondDerivativeProperty(nn.Module):
-    def __init__(self):
-        super(SecondDerivativeProperty, self).__init__()
+        super(DerivativeProperty, self).__init__()
 
 
 class EnergyOutput(DirectProperty):
@@ -81,7 +72,7 @@ class EnergyOutput(DirectProperty):
         # outputs.energy = energy
         return energy
 
-class GradientForceOutput(FirstDerivativeProperty):
+class GradientForceOutput(DerivativeProperty):
     '''
     Gradient force prediction
     '''
@@ -120,6 +111,28 @@ class DirectForceOutput(DirectProperty):
         force = force.sum(dim=-1)  # n_nodes, 3
         # outputs.direct_force = force
         return force
+    
+class HessianOutput(DerivativeProperty):
+    '''
+    Hessian prediction
+    '''
+    def __init__(self):
+        super(HessianOutput, self).__init__()
+
+    def forward(self, outputs):
+        hessian = torch.vmap(
+            lambda vec: grad(
+                -outputs.gradient_force.flatten(), 
+                outputs.disp, 
+                grad_outputs=vec, 
+                create_graph=True,
+                )[0],
+            )(torch.eye(outputs.gradient_force.numel()))
+        hessian = hessian.reshape(*outputs.gradient_force.shape, *outputs.disp.shape)
+        hessian = scatter(hessian, outputs.edge_index[0], dim=2, reduce='sum', dim_size=outputs.atom_node.size(0)) - \
+            scatter(hessian, outputs.edge_index[1], dim=2, reduce='sum', dim_size=outputs.atom_node.size(0))
+        # outputs.hessian = hessian
+        return hessian
     
 
 class SumAggregator(nn.Module):
