@@ -238,6 +238,26 @@ class Trainer(object):
                     if self.optimizer.param_groups[0]['lr'] <= self.lr_scheduler.min_lrs[0]:
                         break
 
+        print('Training finished')
+        
+        # load best model
+        self.model = torch.load(os.path.join(self.model_path, 'best_model.pt'))
+        self.model.eval()
+        log_one_epoch = {'epoch': 'final'}
+        train_log = self.run_one_epoch(self.train_generator, step=False)
+        log_one_epoch = log_one_epoch | {f'train_{key}': value for key, value in train_log.items()}
+        if self.val_generator is not None:
+            val_log = self.run_one_epoch(self.val_generator, step=False)
+            log_one_epoch = log_one_epoch | {f'val_{key}': value for key, value in val_log.items()}
+        if self.test_generator is not None:
+            test_log = self.run_one_epoch(self.test_generator, step=False)
+            log_one_epoch = log_one_epoch | {f'test_{key}': value for key, value in test_log.items()}
+        if self.output_path is not None:
+            self.local_log(log_one_epoch)
+        if self.log_wandb:
+            wandb.log(log_one_epoch)
+
+
     def run_one_epoch(self, generator, step=False):
         log_one_epoch = {}
         for batch in generator:
