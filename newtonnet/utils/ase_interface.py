@@ -54,7 +54,7 @@ class MLAseCalculator(Calculator):
         for model in model_path:
             model = torch.load(model, map_location=self.device[0])
             for key in self.properties:
-                if (key == 'forces') and ('gradient_force' in model.infer_properties):
+                if key == 'forces':
                     key = 'gradient_force'
                 if key in model.infer_properties:
                     continue
