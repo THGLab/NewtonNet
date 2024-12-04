@@ -1,6 +1,6 @@
 import torch
 
-def get_precison_by_string(key):
+def get_precision_by_string(key):
     '''
     Get the precision for data and model.
     '''

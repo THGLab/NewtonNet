@@ -2,27 +2,30 @@ import numpy as np
 from ase.calculators.calculator import Calculator
 
 import torch
-from torch_geometric.nn import radius_graph
+from torch_geometric.data import Data
 
-from newtonnet.layers.activations import get_activation_by_string
+from newtonnet.layers.precision import get_precision_by_string
 from newtonnet.layers.scalers import get_scaler_by_string
 from newtonnet.models.output import get_output_by_string, get_aggregator_by_string
 from newtonnet.models.output import CustomOutputSet, DerivativeProperty
+from newtonnet.data import RadiusGraph
 
 
 ##-------------------------------------
 ##     ML model ASE interface
 ##--------------------------------------
 class MLAseCalculator(Calculator):
-    implemented_properties = ['energy', 'forces', 'hessian']
+    implemented_properties = ['energy', 'free_energy', 'forces', 'hessian', 'stress']
+    # note that the free_energy is not the Gibbs/Helmholtz free energy, but the potential energy in the ASE calculator, how confusing
 
     ### Constructor ###
     def __init__(
             self, 
             model_path: str,
-            properties: list = ['energy', 'forces'], 
+            properties: list = ['energy', 'free_energy', 'forces'], 
             disagreement: str = 'std',
             device: str | list[str] = 'cpu',
+            precision: str = 'float32',
             script: bool = False,
             trace_n_atoms: int = 0,
             **kwargs,
@@ -33,9 +36,10 @@ class MLAseCalculator(Calculator):
         Parameters:
             model_path (str): The path to the model.
             settings_path (str): The path to the settings.
-            properties (list): The properties to be predicted. Default: ['energy', 'forces'].
+            properties (list): The properties to be predicted. Default: ['energy', 'free_energy', 'forces'].
             disagreement (str): The type of disagreement to be calculated. Default: 'std'.
             device (str): The device for the calculator. Default: 'cpu'.
+            precision (str): The precision of the calculator. Default: 'float32'.
             script (bool): Whether to script the model. Default: False.
             trace_n_atoms (int): The number of atoms to be traced. Default: 0.
         """
@@ -45,71 +49,75 @@ class MLAseCalculator(Calculator):
             self.device = [torch.device(item) for item in device]
         else:
             self.device = [torch.device(device)]
+        self.dtype = get_precision_by_string(precision)
 
         self.models = []
         self.properties = properties
-        self.dtype = None
         if type(model_path) is not list:
             model_path = [model_path]
         for model in model_path:
             model = torch.load(model, map_location=self.device[0])
+            keys_to_keep = ['energy']
             for key in self.properties:
-                if key == 'forces':
-                    key = 'gradient_force'
+                key = 'energy' if key == 'free_energy' else key
+                key = 'gradient_force' if key == 'forces' else key
+                keys_to_keep.append(key)
                 if key in model.infer_properties:
                     continue
                 model.infer_properties.append(key)
-                output_layer = get_output_by_string(key)
-                model.output_layers.append(output_layer)
-                if isinstance(output_layer, DerivativeProperty):
-                    model.embedding_layer.requires_dr = True
-                scaler = get_scaler_by_string(key)
-                model.scalers.append(scaler)
-                aggregator = get_aggregator_by_string(key)
-                model.aggregators.append(aggregator)
-            self.dtype = next(model.named_parameters())[1].dtype
+                model.output_layers.append(get_output_by_string(key))
+                model.scalers.append(get_scaler_by_string(key))
+                model.aggregators.append(get_aggregator_by_string(key))
+            ids_to_remove = [i for i, key in enumerate(model.infer_properties) if key not in keys_to_keep]
+            for i in reversed(ids_to_remove):
+                model.infer_properties.pop(i)
+                model.output_layers.pop(i)
+                model.scalers.pop(i)
+                model.aggregators.pop(i)
+            model.embedding_layer.requires_dr = any(isinstance(layer, DerivativeProperty) for layer in model.output_layers)
+            model.to(self.dtype)
+            model.eval()
             self.models.append(model)
+        
+        self.radius_graph = RadiusGraph(self.models[0].embedding_layer.norm.r)
         
         self.script = script
         self.trace_n_atoms = trace_n_atoms
         self.disagreement = disagreement
         
 
-    def calculate(self, atoms=None, properties=['energy', 'forces'], system_changes=None):
+    def calculate(self, atoms=None, properties=['energy', 'forces', 'stress'], system_changes=None):
         super().calculate(atoms, self.properties, system_changes)
         preds = {}
         if 'energy' in self.properties:
             preds['energy'] = np.zeros(len(self.models))
+        if 'free_energy' in self.properties:
+            preds['free_energy'] = np.zeros(len(self.models))
         if 'forces' in self.properties:
             preds['forces'] = np.zeros((len(self.models), len(atoms), 3))
         if 'hessian' in self.properties:
             preds['hessian'] = np.zeros((len(self.models), len(atoms), 3, len(atoms), 3))
-        z = torch.tensor(atoms.numbers, dtype=torch.long, device=self.device[0])
-        pos = torch.tensor(atoms.positions, dtype=torch.float, device=self.device[0])
-        try:
-            edge_index = torch.tensor(atoms.edge_index, dtype=torch.long, device=self.device[0])
-            disp = torch.tensor(atoms.disp, dtype=torch.float, device=self.device[0])
-            # print('using precomputed edge_index')
-        except AttributeError:
-            # edge_index = torch.tensor(
-            #     np.stack(neighbor_list('ij', atoms, cutoff=float(self.models[0].embedding_layer.norm.r))), 
-            #     dtype=torch.long, device=self.device[0])
-            edge_index = radius_graph(
-                pos,
-                self.models[0].embedding_layer.norm.r,
-                max_num_neighbors=1024,
-            )
-            disp = pos[edge_index[0]] - pos[edge_index[1]]
-            # print('using radius_graph')
+        if 'stress' in self.properties:
+            preds['stress'] = np.zeros((len(self.models), 6))
+        z = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long, device=self.device[0])
+        pos = torch.tensor(atoms.get_positions(wrap=True), dtype=torch.float, device=self.device[0])
         batch = torch.zeros_like(z, dtype=torch.long, device=self.device[0])
+        lattice = torch.tensor(atoms.get_cell().array, dtype=torch.float, device=self.device[0])
+        lattice[~atoms.get_pbc()] = torch.inf
+        data = Data(pos=pos, z=z, lattice=lattice, batch=batch)
+        data = self.radius_graph(data)
         for model_, model in enumerate(self.models):
-            pred = model(z, disp, edge_index, batch)
+            pred = model(data.z, data.disp, data.edge_index, data.batch)
             if 'energy' in self.properties:
                 preds['energy'][model_] = pred.energy.cpu().detach().numpy()
+            if 'free_energy' in self.properties:
+                preds['free_energy'][model_] = pred.energy.cpu().detach().numpy()
             if 'forces' in self.properties:
                 preds['forces'][model_] = pred.gradient_force.cpu().detach().numpy()
             if 'hessian' in self.properties:
                 preds['hessian'][model_] = pred.hessian.cpu().detach().numpy()
+            if 'stress' in self.properties:
+                preds['stress'][model_] = -pred.stress.cpu().detach().numpy().flatten()[[0, 4, 8, 5, 2, 1]] / atoms.get_volume() / 2
             del pred
 
         self.results['outlier'] = self.q_test(preds['energy'])

@@ -10,7 +10,7 @@ from newtonnet.models import NewtonNet
 from newtonnet.train import Trainer
 from newtonnet.data import RadiusGraph
 from newtonnet.data import parse_train_test
-from newtonnet.layers.precision import get_precison_by_string
+from newtonnet.layers.precision import get_precision_by_string
 from newtonnet.layers.representations import get_representation_by_string
 from newtonnet.layers.scalers import set_scaler_by_string
 from newtonnet.train.loss import get_loss_by_string
@@ -56,7 +56,7 @@ if wandb_kwargs is not None:
     wandb.init(**wandb_kwargs, config=settings)
 
 # device
-precision = get_precison_by_string(settings['general']['precision'])
+precision = get_precision_by_string(settings['general']['precision'])
 if type(settings['general']['device']) is list:
     device = [torch.device(item) for item in settings['general']['device']]
 else:

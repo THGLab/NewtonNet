@@ -3,7 +3,7 @@
 import argparse
 
 from newtonnet.data import MolecularDataset, MolecularInMemoryDataset
-from newtonnet.layers.precision import get_precison_by_string
+from newtonnet.layers.precision import get_precision_by_string
 # torch.autograd.set_detect_anomaly(True)
 
 # argument parser description
@@ -33,7 +33,7 @@ parser.add_argument(
 # define arguments
 args = parser.parse_args()
 root = args.root
-precision = get_precison_by_string(args.precision)
+precision = get_precision_by_string(args.precision)
 in_memory = args.in_memory
 
 # data
