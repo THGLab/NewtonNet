@@ -3,7 +3,11 @@ import os.path as osp
 from tqdm import tqdm
 from typing import Callable, List, Optional, Union
 import numpy as np
-import ase, ase.io
+import ase
+from ase import units
+from ase.io import read
+setattr(units, 'kcal/mol', units.kcal / units.mol)
+setattr(units, 'kJ/mol', units.kJ / units.mol)
 
 import torch
 import torch.nn as nn
@@ -26,9 +30,12 @@ class MolecularDataset(Dataset):
     def __init__(
         self,
         precision: torch.dtype = torch.float,
+        length_unit: str = 'Ang',
+        energy_unit: str = 'eV',
         **kwargs,
     ) -> None:
         self.precision = precision
+        self.units = {'length': getattr(units, length_unit), 'energy': getattr(units, energy_unit)}
         super().__init__(**kwargs)
 
     @property
@@ -54,9 +61,9 @@ class MolecularDataset(Dataset):
         idx = 0
         for raw_path in tqdm(self.raw_paths):
             if raw_path.endswith('.npz'):
-                data_list = parse_npz(raw_path, self.pre_transform, self.pre_filter, self.precision)
+                data_list = parse_npz(raw_path, self.pre_transform, self.pre_filter, self.precision, self.units)
             elif raw_path.endswith('.xyz') or raw_path.endswith('.extxyz'):
-                data_list = parse_xyz(raw_path, self.pre_transform, self.pre_filter, self.precision)
+                data_list = parse_xyz(raw_path, self.pre_transform, self.pre_filter, self.precision, self.units)
             
             for data in data_list:
                 torch.save(data, osp.join(self.processed_dir, f'data_{idx}.pt'))
@@ -83,9 +90,12 @@ class MolecularInMemoryDataset(InMemoryDataset):
     def __init__(
         self,
         precision: torch.dtype = torch.float,
+        length_unit: str = 'Ang',
+        energy_unit: str = 'eV',
         **kwargs,
     ) -> None:
         self.precision = precision
+        self.units = {'length': getattr(units, length_unit), 'energy': getattr(units, energy_unit)}
         super().__init__(**kwargs)
 
         self.load(self.processed_paths[0])
@@ -112,13 +122,13 @@ class MolecularInMemoryDataset(InMemoryDataset):
         data_path = self.processed_paths[0]
         for raw_path in tqdm(self.raw_paths):
             if raw_path.endswith('.npz'):
-                data_list.extend(parse_npz(raw_path, self.pre_transform, self.pre_filter, self.precision))
+                data_list.extend(parse_npz(raw_path, self.pre_transform, self.pre_filter, self.precision, self.units))
             elif raw_path.endswith('.xyz') or raw_path.endswith('.extxyz'):
-                data_list.extend(parse_xyz(raw_path, self.pre_transform, self.pre_filter, self.precision))
+                data_list.extend(parse_xyz(raw_path, self.pre_transform, self.pre_filter, self.precision, self.units))
             
         self.save(data_list, data_path)
 
-def parse_npz(raw_path: str, pre_transform: Callable, pre_filter: Callable, precision: torch.dtype) -> List[Data]:
+def parse_npz(raw_path: str, pre_transform: Callable, pre_filter: Callable, precision: torch.dtype, units: dict) -> List[Data]:
     data_list = []
     raw_data = np.load(raw_path)
 
@@ -137,12 +147,12 @@ def parse_npz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
     for i in range(pos.size(0)):
         data = Data()
         data.z = z.reshape(-1) if z.dim() < 2 else z[i].reshape(-1)
-        data.pos = pos[i].reshape(-1, 3)
-        data.lattice = lattice.reshape(1, 3, 3)
+        data.pos = pos[i].reshape(-1, 3) * units['length']
+        data.lattice = lattice.reshape(1, 3, 3) * units['length']
         if energy is not None:
-            data.energy = energy[i].reshape(1)
+            data.energy = energy[i].reshape(1) * units['energy']
         if force is not None:
-            data.force = force[i].reshape(-1, 3)
+            data.force = force[i].reshape(-1, 3) * units['energy'] / units['length']
 
         if pre_filter is not None and not pre_filter(data):
             continue
@@ -152,14 +162,14 @@ def parse_npz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
 
     return data_list
 
-def parse_xyz(raw_path: str, pre_transform: Callable, pre_filter: Callable, precision: torch.dtype) -> List[Data]:
+def parse_xyz(raw_path: str, pre_transform: Callable, pre_filter: Callable, precision: torch.dtype, units: dict) -> List[Data]:
     data_list = []
     atoms_list = ase.io.read(raw_path, index=':')
 
     for atoms in atoms_list:
         atoms.set_constraint()
         z = torch.from_numpy(atoms.get_atomic_numbers()).int()
-        pos = torch.from_numpy(atoms.get_positions()).to(precision)
+        pos = torch.from_numpy(atoms.get_positions(wrap=True)).to(precision)
         lattice = torch.from_numpy(atoms.get_cell().array).to(precision)
         lattice[lattice.norm(dim=-1) < 1e-3] = torch.inf
         lattice[~atoms.get_pbc()] = torch.inf
@@ -168,10 +178,10 @@ def parse_xyz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
 
         data = Data()
         data.z = z.reshape(-1)
-        data.pos = pos.reshape(-1, 3)
-        data.lattice = lattice.reshape(1, 3, 3)
-        data.energy = energy.reshape(1)
-        data.force = forces.reshape(-1, 3)
+        data.pos = pos.reshape(-1, 3) * units['length']
+        data.lattice = lattice.reshape(1, 3, 3) * units['length']
+        data.energy = energy.reshape(1) * units['energy']
+        data.force = forces.reshape(-1, 3) * units['energy'] / units['length']
 
         if pre_filter is not None and not pre_filter(data):
             continue

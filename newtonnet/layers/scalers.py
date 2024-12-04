@@ -12,6 +12,8 @@ def get_scaler_by_string(key):
         scaler = ScaleShift(scale=True, shift=False)
     elif key == 'hessian':
         scaler = ScaleShift(scale=False, shift=False)
+    elif key == 'stress':
+        scaler = ScaleShift(scale=False, shift=False)
     else:
         raise NotImplementedError(f'Scaler type {key} is not implemented yet')
     return scaler
