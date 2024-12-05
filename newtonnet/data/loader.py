@@ -6,8 +6,8 @@ import numpy as np
 import ase
 from ase import units
 from ase.io import read
-setattr(units, 'kcal/mol', units.kcal / units.mol)
-setattr(units, 'kJ/mol', units.kJ / units.mol)
+units.__setattr__('kcal/mol', units.kcal / units.mol)
+units.__setattr__('kJ/mol', units.kJ / units.mol)
 
 import torch
 import torch.nn as nn
@@ -30,12 +30,12 @@ class MolecularDataset(Dataset):
     def __init__(
         self,
         precision: torch.dtype = torch.float,
-        length_unit: str = 'Ang',
-        energy_unit: str = 'eV',
+        data_length_unit: str = 'Ang',
+        data_energy_unit: str = 'eV',
         **kwargs,
     ) -> None:
         self.precision = precision
-        self.units = {'length': getattr(units, length_unit), 'energy': getattr(units, energy_unit)}
+        self.units = {'length': getattr(units, data_length_unit), 'energy': getattr(units, data_energy_unit)}
         super().__init__(**kwargs)
 
     @property
@@ -90,12 +90,12 @@ class MolecularInMemoryDataset(InMemoryDataset):
     def __init__(
         self,
         precision: torch.dtype = torch.float,
-        length_unit: str = 'Ang',
-        energy_unit: str = 'eV',
+        data_length_unit: str = 'Ang',
+        data_energy_unit: str = 'eV',
         **kwargs,
     ) -> None:
         self.precision = precision
-        self.units = {'length': getattr(units, length_unit), 'energy': getattr(units, energy_unit)}
+        self.units = {'length': getattr(units, data_length_unit), 'energy': getattr(units, data_energy_unit)}
         super().__init__(**kwargs)
 
         self.load(self.processed_paths[0])
