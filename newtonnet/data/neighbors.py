@@ -23,6 +23,7 @@ class RadiusGraph(BaseTransform):
         r: float,
         loop: bool = False,
         flow: str = 'source_to_target',
+        max_num_neighbors: int = 1024,
         num_workers: int = 1,
     ) -> None:
         self.r = r
