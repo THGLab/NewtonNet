@@ -104,7 +104,7 @@ class MLAseCalculator(Calculator):
         batch = torch.zeros_like(z, dtype=torch.long, device=self.device[0])
         lattice = torch.tensor(atoms.get_cell().array, dtype=torch.float, device=self.device[0])
         lattice[~atoms.get_pbc()] = torch.inf
-        data = Data(pos=pos, z=z, lattice=lattice, batch=batch)
+        data = Data(pos=pos, z=z, lattice=lattice.unsqueeze(0), batch=batch)
         data = self.radius_graph(data)
         for model_, model in enumerate(self.models):
             pred = model(data.z, data.disp, data.edge_index, data.batch)
