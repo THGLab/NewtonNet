@@ -97,7 +97,15 @@ class NewtonNet(nn.Module):
             setattr(outputs, key, output)
 
         return outputs
-
+    
+    def train(self, mode=True):
+        '''
+        Set the network to training mode
+        '''
+        super().train(mode)
+        for output_layer in self.output_layers:
+            if isinstance(output_layer, DerivativeProperty):
+                output_layer.create_graph = mode
 
 
 class EmbeddingNet(nn.Module):

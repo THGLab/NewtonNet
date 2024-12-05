@@ -84,7 +84,7 @@ class Trainer(object):
             self.make_subdirs(output_base_path, script_path, settings_path)
         else:
             self.output_path = None
-            self.graph_path = None
+            # self.graph_path = None
             self.model_path = None
 
         # checkpoints
@@ -111,19 +111,31 @@ class Trainer(object):
         # create subdirectory for run scripts
         script_out = os.path.join(self.output_path, 'run_scripts')
         os.makedirs(script_out)
-        shutil.copyfile(script_path, os.path.join(script_out,os.path.basename(script_path)))
-        shutil.copyfile(settings_path, os.path.join(script_out,os.path.basename(settings_path)))
+        shutil.copyfile(script_path, os.path.join(script_out, os.path.basename(script_path)))
+        shutil.copyfile(settings_path, os.path.join(script_out, os.path.basename(settings_path)))
 
         # create subdirectory for computation graph
-        self.graph_path = os.path.join(self.output_path, 'graph')
-        os.makedirs(self.graph_path)
+        # self.graph_path = os.path.join(self.output_path, 'graph')
+        # os.makedirs(self.graph_path)
 
         # create subdirectory for models
         self.model_path = os.path.join(self.output_path, 'models')
         os.makedirs(self.model_path)
 
     def resume(self, checkpoint):
-        train_state = torch.load(os.path.join(checkpoint, 'models', 'train_state.pt'))
+        shutil.copyfile(
+            os.path.join(checkpoint, 'models', 'train_state.pt'),
+            os.path.join(self.output_path, 'models', 'train_state.pt')
+        )
+        shutil.copyfile(
+            os.path.join(checkpoint, 'models', 'best_model.pt'),
+            os.path.join(self.output_path, 'models', 'best_model.pt')
+        )
+        shutil.copyfile(
+            os.path.join(checkpoint, 'log.csv'),
+            os.path.join(self.output_path, 'log.csv')
+        )
+        train_state = torch.load(os.path.join(self.output_path, 'models', 'train_state.pt'))
         self.start_epoch = train_state['epoch'] + 1
         self.start_step = train_state['step']
         self.model.load_state_dict(train_state['model_state_dict'])
@@ -131,7 +143,7 @@ class Trainer(object):
         self.lr_scheduler.load_state_dict(train_state['scheduler_state_dict'])
         self.best_val_loss = train_state['best_val_loss']
         torch.set_rng_state(train_state['rng_state'])
-        self.log = pd.read_csv(os.path.join(checkpoint, 'log.csv'))
+        self.log = pd.read_csv(os.path.join(self.output_path, 'log.csv'))
 
     def print_layers(self):
         print('Model:')
@@ -205,8 +217,8 @@ class Trainer(object):
                     log_one_epoch['save_model'] = True
 
             # plots
-            if epoch % self.check_log == 0 and self.graph_path is not None:
-                self.plot_grad_flow(epoch)
+            # if epoch % self.check_log == 0 and self.graph_path is not None:
+            #     self.plot_grad_flow(epoch)
             if self.output_path is not None:
                 self.local_log(log_one_epoch)
             if self.log_wandb:
