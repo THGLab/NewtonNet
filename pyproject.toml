@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "NewtonNet"
+description = "A Newtonian message passing network for deep learning of interatomic potentials and forces"
+version = "2.0.0"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Teresa Head-Gordon", email = "thg@berkeley.edu" },
+]
+keywords = [
+    "Machine Learning", 
+    "Data Mining", 
+    "Quantum Chemistry", 
+    "Molecular Dynamics",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Natural Language :: English",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "numpy<2.0.0",
+    "scipy",
+    "scikit-learn",
+    "pandas",
+    "ase",
+    "tqdm",
+    "pyyaml",
+    "wandb",
+    "torch",
+    "torch_geometric",
+    "torch_scatter",
+    "torch_cluster",
+]
+
+[project.optional-dependencies]
+all = [
+    "torch_scatter",
+    "torch_sparse",
+    "torch_cluster",
+    "torch_spline_conv",
+]
+
+[project.urls]
+repository = "https://github.com/THGLab/NewtonNet"
