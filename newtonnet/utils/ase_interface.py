@@ -8,7 +8,7 @@ from torch_geometric.data import Data, Batch
 from newtonnet.layers.precision import get_precision_by_string
 from newtonnet.layers.scalers import get_scaler_by_string
 from newtonnet.models.output import get_output_by_string, get_aggregator_by_string
-from newtonnet.models.output import CustomOutputSet, DerivativeProperty
+from newtonnet.models.output import DerivativeProperty, SecondDerivativeProperty
 from newtonnet.data import RadiusGraph
 
 
@@ -99,9 +99,9 @@ class MLAseCalculator(Calculator):
                 hessian = pred.hessian.cpu().detach().numpy()
                 preds['hessian'][model_] = hessian.reshape(n_frames, n_atoms, 3, n_atoms, 3)
             if 'stress' in self.properties:
-                stress = pred.stress.cpu().detach().numpy()
+                virial = pred.virial.cpu().detach().numpy()
                 volume = np.array([atoms[frame].get_volume() for frame in range(n_frames)])
-                stress = -stress[:, [0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]] / volume[:, None] / 2
+                stress = -virial[:, [0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]] / volume[:, None] / 2
                 preds['stress'][model_] = stress
             del pred
 
@@ -125,8 +125,13 @@ class MLAseCalculator(Calculator):
         model = torch.load(model, map_location=self.device[0])
         keys_to_keep = ['energy']
         for key in self.properties:
-            key = 'energy' if key == 'free_energy' else key
-            key = 'gradient_force' if key == 'forces' else key
+            key = {
+                'energy': 'energy',
+                'free_energy': 'energy',
+                'forces': 'gradient_force',
+                'stress': 'virial',
+                'hessian': 'hessian',
+            }.get(key)
             keys_to_keep.append(key)
             if key in model.infer_properties:
                 continue
@@ -140,13 +145,13 @@ class MLAseCalculator(Calculator):
             model.output_layers.pop(i)
             model.scalers.pop(i)
             model.aggregators.pop(i)
-        model.embedding_layer.requires_dr = False
-        for layer in model.output_layers:
-            if isinstance(layer, DerivativeProperty):
-                model.embedding_layer.requires_dr = True
-                layer.create_graph = False
         model.to(self.dtype)
         model.eval()
+        model.embedding_layer.requires_dr = any(isinstance(layer, DerivativeProperty) for layer in model.output_layers)
+        if any(isinstance(layer, SecondDerivativeProperty) for layer in model.output_layers):
+            for layer in model.output_layers:
+                if isinstance(layer, DerivativeProperty):
+                    layer.create_graph = True
         return model
 
     def format_data(self, atoms_list):
