@@ -39,7 +39,7 @@ class ShiftedSoftplus(nn.Module):
         y = ln(1 + e^(-x)) - ln(2)
     '''
     def __init__(self):
-        super(ShiftedSoftplus, self).__init__()
+        super().__init__()
         self.softplus = nn.Softplus()
         self.shift = torch.log(torch.tensor(2.0))
 
@@ -54,7 +54,7 @@ class SwiGLU(nn.Module):
         y = gate(x) * out(x) = swish(linear(x)) * linear(x)
     '''
     def __init__(self, in_features, out_features):
-        super(SwiGLU, self).__init__()
+        super().__init__()
         self.linear1 = nn.Linear(in_features, out_features)
         self.linear2 = nn.Linear(in_features, out_features)
         self.gate = nn.SiLU()

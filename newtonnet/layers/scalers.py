@@ -45,7 +45,7 @@ class ScaleShift(nn.Module):
         shift (bool): Whether to shift the output.
     '''
     def __init__(self, scale=True, shift=True):
-        super(ScaleShift, self).__init__()
+        super().__init__()
         self.scale = nn.Embedding.from_pretrained(torch.ones(118 + 1, 1), freeze=False, padding_idx=0) if scale else None
         self.shift = nn.Embedding.from_pretrained(torch.zeros(118 + 1, 1), freeze=False, padding_idx=0) if shift else None
 
