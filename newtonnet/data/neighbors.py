@@ -35,7 +35,8 @@ class RadiusGraph(BaseTransform):
         assert data.pos is not None
 
         if data.lattice is not None and data.lattice.max(dim=-1).values.isfinite().any():
-            n_cell = (self.r / data.lattice.norm(dim=-1)).ceil().int()
+            n_cell = (self.r / data.lattice.norm(dim=-1)).ceil().int().flatten()
+            assert len(n_cell) == 3
             n_cell_tot = (2 * n_cell + 1).prod()
             shift = torch.tensor([[i, j, k] for i in range(-n_cell[0], n_cell[0] + 1) for j in range(-n_cell[1], n_cell[1] + 1) for k in range(-n_cell[2], n_cell[2] + 1)], dtype=data.pos.dtype, device=data.pos.device)
             shift = shift @ data.lattice
