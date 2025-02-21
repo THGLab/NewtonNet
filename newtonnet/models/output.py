@@ -143,7 +143,7 @@ class HessianOutput(SecondDerivativeProperty):
                 create_graph=self.create_graph,
                 retain_graph=True,
                 )[0],
-            )(torch.eye(outputs.gradient_force.numel()))
+            )(torch.eye(outputs.gradient_force.numel(), device=outputs.gradient_force.device))
         hessian = hessian.reshape(*outputs.gradient_force.shape, *outputs.disp.shape)
         hessian = scatter(hessian, outputs.edge_index[0], dim=2, reduce='sum', dim_size=outputs.atom_node.size(0)) - \
             scatter(hessian, outputs.edge_index[1], dim=2, reduce='sum', dim_size=outputs.atom_node.size(0))
