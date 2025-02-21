@@ -34,8 +34,8 @@ dependencies = [
     "wandb",
     "torch",
     "torch_geometric",
-    "torch_scatter @ git+https://github.com/rusty1s/pytorch_scatter.git",
-    "torch_cluster @ git+https://github.com/rusty1s/pytorch_cluster.git",
+    "torch_scatter",
+    "torch_cluster",
 ]
 
 [project.urls]
