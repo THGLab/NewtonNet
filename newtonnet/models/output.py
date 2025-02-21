@@ -16,8 +16,8 @@ def get_output_by_string(key, n_features=None, activation=None):
         output_layer = DirectForceOutput(n_features, activation)
     elif key == 'hessian':
         output_layer = HessianOutput()
-    elif key == 'stress':
-        output_layer = StressOutput()
+    elif key == 'virial':
+        output_layer = VirialOutput()
     else:
         raise NotImplementedError(f'Output type {key} is not implemented yet')
     return output_layer
@@ -31,7 +31,7 @@ def get_aggregator_by_string(key):
         aggregator = NullAggregator()
     elif key == 'hessian':
         aggregator = NullAggregator()
-    elif key == 'stress':
+    elif key == 'virial':
         aggregator = NullAggregator()
     else:
         raise NotImplementedError(f'Aggregate type {key} is not implemented yet')
@@ -46,26 +46,27 @@ class CustomOutputSet:
 
 class DirectProperty(nn.Module):
     def __init__(self):
-        super(DirectProperty, self).__init__()
+        super().__init__()
 
 class DerivativeProperty(nn.Module):
-    def __init__(self, create_graph=False):
-        super(DerivativeProperty, self).__init__()
-        self.create_graph = create_graph
+    def __init__(self):
+        super().__init__()
+        self.create_graph = False  # Set by the model with train() or eval()
 
     def get_pairwise_force(self, outputs):
-        try:
-            pairwise_force = outputs.pairwise_force
-        except AttributeError:
-            pairwise_force = -grad(
+        if not hasattr(outputs, 'pairwise_force'):
+            outputs.pairwise_force = -grad(
                 outputs.energy, 
                 outputs.disp, 
                 grad_outputs=torch.ones_like(outputs.energy),
                 create_graph=self.create_graph, 
                 retain_graph=self.create_graph,
                 )[0]
-            outputs.pairwise_force = pairwise_force
-        return pairwise_force
+        return outputs.pairwise_force
+    
+class SecondDerivativeProperty(DerivativeProperty):
+    def __init__(self):
+        super().__init__()
 
 
 class EnergyOutput(DirectProperty):
@@ -77,7 +78,7 @@ class EnergyOutput(DirectProperty):
         activation (nn.Module): Activation function.
     '''
     def __init__(self, n_features, activation):
-        super(EnergyOutput, self).__init__()
+        super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
@@ -96,8 +97,8 @@ class GradientForceOutput(DerivativeProperty):
     '''
     Gradient force prediction
     '''
-    def __init__(self, create_graph=False):
-        super(GradientForceOutput, self).__init__(create_graph=create_graph)
+    def __init__(self):
+        super().__init__()
 
     def forward(self, outputs):
         pairwise_force = self.get_pairwise_force(outputs)
@@ -111,7 +112,7 @@ class DirectForceOutput(DirectProperty):
     Direct force prediction
     '''
     def __init__(self, n_features, activation):
-        super(DirectForceOutput, self).__init__()
+        super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
@@ -126,12 +127,12 @@ class DirectForceOutput(DirectProperty):
         # outputs.direct_force = force
         return force
     
-class HessianOutput(DerivativeProperty):
+class HessianOutput(SecondDerivativeProperty):
     '''
     Hessian prediction
     '''
-    def __init__(self, create_graph=False):
-        super(HessianOutput, self).__init__(create_graph=create_graph)
+    def __init__(self):
+        super().__init__()
 
     def forward(self, outputs):
         hessian = torch.vmap(
@@ -149,33 +150,32 @@ class HessianOutput(DerivativeProperty):
         # outputs.hessian = hessian
         return hessian
     
-class StressOutput(DerivativeProperty):
+class VirialOutput(DerivativeProperty):
     '''
-    Stress prediction
+    Virial prediction
     '''
-    def __init__(self, create_graph=False):
-        super(StressOutput, self).__init__(create_graph=create_graph)
+    def __init__(self):
+        super().__init__()
 
     def forward(self, outputs):
         pairwise_force = self.get_pairwise_force(outputs)
-        stress = outputs.disp[:, :, None] * pairwise_force[:, None, :]
-        stress = scatter(stress, outputs.edge_index[0], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0)) + \
-            scatter(stress, outputs.edge_index[1], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0))
-        stress = scatter(stress, outputs.batch, dim=0, reduce='sum')
-        # stress = -stress / outputs.volume / 2  # Volume should be included in the stress tensor
-        return stress
+        virial = outputs.disp[:, :, None] * pairwise_force[:, None, :]
+        virial = scatter(virial, outputs.edge_index[0], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0)) + \
+            scatter(virial, outputs.edge_index[1], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0))
+        virial = scatter(virial, outputs.batch, dim=0, reduce='sum')
+        return virial
     
 
 class SumAggregator(nn.Module):
     def __init__(self):
-        super(SumAggregator, self).__init__()
+        super().__init__()
 
     def forward(self, output, outputs):
         return scatter(output, outputs.batch, dim=0, reduce='sum').reshape(-1)
 
 class NullAggregator(nn.Module):
     def __init__(self):
-        super(NullAggregator, self).__init__()
+        super().__init__()
 
     def forward(self, output, outputs):
         return output

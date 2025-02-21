@@ -65,7 +65,7 @@ class BaseLoss(nn.Module):
             'norm': Norm.
     '''
     def __init__(self, mode: str = 'mse', weight: float = 1, transform: str = None, **kwargs):
-        super(BaseLoss, self).__init__()
+        super().__init__()
         self.weight = weight
         self.mode = mode
         if self.mode == 'mse':
@@ -105,7 +105,7 @@ class BaseLoss(nn.Module):
 
 class EnergyLoss(BaseLoss):
     def __init__(self, **kwargs):
-        super(EnergyLoss, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if self.transform is None:
             self.name = f'energy_{self.mode}'
         else:
@@ -116,7 +116,7 @@ class EnergyLoss(BaseLoss):
 
 class EnergyPerAtomLoss(BaseLoss):
     def __init__(self, **kwargs):
-        super(EnergyPerAtomLoss, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if self.transform is None:
             self.name = f'energy_per_atom_{self.mode}'
         else:
@@ -128,7 +128,7 @@ class EnergyPerAtomLoss(BaseLoss):
 
 class GradientForceLoss(BaseLoss):
     def __init__(self, **kwargs):
-        super(GradientForceLoss, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if self.transform is None:
             self.name = f'gradient_force_{self.mode}'
         else:
@@ -139,7 +139,7 @@ class GradientForceLoss(BaseLoss):
     
 class DirectForceLoss(BaseLoss):
     def __init__(self, **kwargs):
-        super(DirectForceLoss, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if self.transform is None:
             self.name = f'direct_force_{self.mode}'
         else:
