@@ -5,12 +5,12 @@ general:
   seed: 0    # random seed
 
 data:
-  train_root: md17_data/aspirin    # path to the training data, where one or multiple xyz files are stored in the 'raw' subdirectory
-  # val_root: md17_data/aspirin    # path to the validation data; if not provided, the validation data will be generated from the training data
-  # test_root: md17_data/aspirin    # path to the test data; if not provided, the test data will be generated from the validation data
+  train_root: md17_data/aspirin/ccsd_train    # path to the training data, where one or multiple xyz files are stored in the 'raw' subdirectory
+  # val_root: md17_data/aspirin/ccsd_val    # path to the validation data; if not provided, the validation data will be generated from the training data
+  test_root: md17_data/aspirin/ccsd_test    # path to the test data; if not provided, the test data will be generated from the validation data
   train_size: 950    # number of training samples; if not provided, the training data will be the entire training dataset
-  val_size: 50    # number of validation samples; if not provided, the validation data will be the entire validation dataset
-  test_size: 1000    # number of test samples; if not provided, the test data will be the entire test dataset
+  val_size: null    # number of validation samples; if not provided, the validation data will be the entire validation dataset
+  test_size: null    # number of test samples; if not provided, the test data will be the entire test dataset
   stats_size: null    # number of samples to calculate the mean and std of the training data; if not provided, the stats size will be the training size
   train_batch_size: 10    # batch size for training
   val_batch_size: 1000    # batch size for validation
@@ -38,9 +38,12 @@ model:
   infer_properties: ['energy', 'gradient_force']    # output properties of the model, energy, gradient_force, direct_force, hessian, stress
 
 training:
-  wandb:    # config of the Weights & Biases logger
-    project: NewtonNet_example    # project name
-    name: null    # run name
+  # wandb:    # config of the Weights & Biases logger
+  #   project: NewtonNet_example    # project name
+  #   name: null    # run name
+  fit_scalers:    # config of the output scaling layers
+    fit_scale: True    # fit or re-fit the scaling layers to training data std
+    fit_shift: True    # fit or re-fit the scaling layers to training data mean
   loss:    # config of the loss function
     energy:    # config of the energy loss
       weight: 1.0    # weight of the energy loss
