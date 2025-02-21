@@ -56,7 +56,7 @@ class MLAseCalculator(Calculator):
         if type(model_path) is not list:
             model_path = [model_path]
         for model in model_path:
-            model = torch.load(model, map_location=self.device[0])
+            model = torch.load(model, map_location=self.device[0], weights_only=False)
             keys_to_keep = ['energy']
             for key in self.properties:
                 key = 'energy' if key == 'free_energy' else key
