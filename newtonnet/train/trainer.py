@@ -56,7 +56,7 @@ class Trainer(object):
             clip_grad: float = 0.0,
             log_wandb: bool = False,
             ):
-        super(Trainer, self).__init__()
+        super().__init__()
         
         # training parameters
         self.model = model

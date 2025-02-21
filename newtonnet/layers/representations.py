@@ -30,7 +30,7 @@ class ScaledNorm(nn.Module):
         r (float): cutoff radius.
     '''
     def __init__(self, r, **kwargs):
-        super(ScaledNorm, self).__init__()
+        super().__init__()
         self.r = r
 
     def forward(self, disp):
@@ -64,7 +64,7 @@ class PolynomialCutoff(nn.Module):
         y(1) = 0
     '''
     def __init__(self, p, **kwargs):
-        super(PolynomialCutoff, self).__init__()
+        super().__init__()
         self.p = p
 
     def forward(self, dist):
@@ -97,7 +97,7 @@ class CosineCutoff(nn.Module):
         y(1) = 0
     '''
     def __init__(self, **kwargs):
-        super(CosineCutoff, self).__init__()
+        super().__init__()
 
     def forward(self, dist):
         """Compute cutoff.
@@ -127,7 +127,7 @@ class RadialBesselLayer(nn.Module):
     '''
 
     def __init__(self, n_basis):
-        super(RadialBesselLayer, self).__init__()
+        super().__init__()
         self.n_basis = n_basis
         self.frequencies = nn.Parameter(torch.arange(1, self.n_basis + 1) * torch.pi, requires_grad=False)
         self.epsilon = 1.0e-8
