@@ -1,741 +1,228 @@
+import os
+import os.path as osp
+from tqdm import tqdm
+from typing import Callable, List, Optional, Union
 import numpy as np
+import ase
+from ase import units
+from ase.io import read
+units.__setattr__('kcal/mol', units.kcal / units.mol)
+units.__setattr__('kJ/mol', units.kJ / units.mol)
+
 import torch
-from torch.utils.data import Dataset
-
-from newtonnet.utils import standardize_batch
-from newtonnet.utils import rotate_molecule, euler_rotation_matrix
-
-
-class BatchDataset(Dataset):
-    """
-    Parameters
-    ----------
-    input: dict
-        The dictionary of batch data in ndarray format.
-
-    """
-    def __init__(self, input, device):
-
-        for k, v in input.items():
-            if isinstance(v, np.ndarray):
-                input[k] = torch.tensor(v, device=device)
-            input[k] = input[k].to(device)
-
-    def __getitem__(self, index):
-
-        output = dict()
-        output['R'] = self.R[index]
-        output['Z'] = self.Z[index]
-        output['E'] = self.E[index]
-        output['F'] = self.F[index]
-        output['AM'] = self.AM[index]
-        output['N'] = self.N[index]
-        output['NM'] = self.NM[index]
-        if self.RM is not None:
-            output['RM'] = self.RM[index]
-
-        return output
-
-    def __len__(self):
-        return self.R.size()[0]
+import torch.nn as nn
+from torch_geometric.data import Dataset, InMemoryDataset, Data
+from torch_geometric.utils import scatter
 
 
-def batch_dataset_converter(input, device):
-    for k, v in input.items():
-        if isinstance(v, np.ndarray):
-            input[k] = torch.tensor(v)
-        input[k] = input[k].to(device)
-    return input
+class MolecularDataset(Dataset):
+    '''
+    This class is a dataset for molecular data.
+    
+    Args:
+        root (str): The root directory where the dataset should be saved.
+        transform (callable, optional): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before every access. Default: None.
+        pre_transform (callable, optional): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before being saved to disk. Default: None.
+        pre_filter (callable, optional): A function that takes in a data object and returns a boolean value, indicating whether the data object should be included in the final dataset. Default: None.
+        force_reload (bool): Whether to re-process the dataset. Default: False.
+        precision (torch.dtype): The precision of the data. Default: torch.float.
+    '''
+    def __init__(
+        self,
+        precision: torch.dtype = torch.float,
+        data_length_unit: str = 'Ang',
+        data_energy_unit: str = 'eV',
+        **kwargs,
+    ) -> None:
+        self.precision = precision
+        self.units = {'length': getattr(units, data_length_unit), 'energy': getattr(units, data_energy_unit)}
+        super().__init__(**kwargs)
 
+    @property
+    def raw_dir(self) -> str:
+        return osp.join(self.root, 'raw')
 
-def extensive_train_loader(data,
-                           env_provider=None,
-                           batch_size=32,
-                           n_rotations=0,
-                           freeze_rotations=False,
-                           keep_original=True,
-                           device=None,
-                           shuffle=True,
-                           drop_last=False):
-    r"""
-    The main function to load and iterate data based on the extensive environment provider.
+    @property
+    def processed_dir(self) -> str:
+        return osp.join(self.root, 'processed')
 
-    Parameters
-    ----------
-    data: dict
-        dictionary of arrays with following keys:
-            - 'R':positions
-            - 'Z':atomic_numbers
-            - 'E':energy
-            - 'F':forces
+    @property
+    def raw_file_names(self) -> Union[str, List[str]]:
+        names = [name for name in os.listdir(self.raw_dir) if name.endswith(('.npz', '.xyz', '.extxyz'))]
+        return names
 
-    env_provider: ShellProvider
-        the instance of combust.data.ExtensiveEnvironment or combust.data.PeriodicEnvironment
+    # @property
+    def processed_file_names(self) -> List[str]:
+        if not osp.exists(self.processed_dir):
+            return []
+        return [name for name in os.listdir(self.processed_dir) if name.startswith('data_') and name.endswith('.pt')]
 
-    batch_size: int, optional (default: 32)
-        The size of output tensors
+    def process(self) -> None:
+        idx = 0
+        for raw_path in tqdm(self.raw_paths):
+            if raw_path.endswith('.npz'):
+                data_list = parse_npz(raw_path, self.pre_transform, self.pre_filter, self.precision, self.units)
+            elif raw_path.endswith('.xyz') or raw_path.endswith('.extxyz'):
+                data_list = parse_xyz(raw_path, self.pre_transform, self.pre_filter, self.precision, self.units)
+            
+            for data in data_list:
+                torch.save(data, osp.join(self.processed_dir, f'data_{idx}.pt'))
+                idx += 1
 
-    n_rotations: int, optional (default: 0)
-        Number of times to rotate voxel boxes for data augmentation.
-        If zero, the original orientation will be used.
+    def len(self) -> int:
+        return len(self.processed_file_names())
+    
+    def get(self, idx: int) -> Data:
+        return torch.load(osp.join(self.processed_dir, f'data_{idx}.pt'))
+    
+class MolecularInMemoryDataset(InMemoryDataset):
+    '''
+    This class is an in-memeory dataset for molecular data.
+    
+    Args:
+        root (str): The root directory where the dataset should be saved.
+        transform (callable, optional): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before every access. Default: None.
+        pre_transform (callable, optional): A function/transform that takes in a data object and returns a transformed version. The data object will be transformed before being saved to disk. Default: None.
+        pre_filter (callable, optional): A function that takes in a data object and returns a boolean value, indicating whether the data object should be included in the final dataset. Default: None.
+        force_reload (bool): Whether to re-process the dataset. Default: False.
+        precision (torch.dtype): The precision of the data. Default: torch.float.
+    '''
+    def __init__(
+        self,
+        precision: torch.dtype = torch.float,
+        data_length_unit: str = 'Ang',
+        data_energy_unit: str = 'eV',
+        **kwargs,
+    ) -> None:
+        self.precision = precision
+        self.units = {'length': getattr(units, data_length_unit), 'energy': getattr(units, data_energy_unit)}
+        super().__init__(**kwargs)
 
-    freeze_rotations: bool, optional (default: False)
-        If True rotation angles will be determined and fixed during generation.
+        self.load(self.processed_paths[0])
 
-    keep_original: bool, optional (default: True)
-        If True, the original orientation of data is kept in each epoch
+    @property
+    def raw_dir(self) -> str:
+        return osp.join(self.root, 'raw')
 
-    device: torch.device
-        either cpu or gpu (cuda) device.
+    @property
+    def processed_dir(self) -> str:
+        return osp.join(self.root, 'processed')
 
-    shuffle: bool, optional (default: True)
-        If ``True``, shuffle the list of file path and batch indices between iterations.
+    @property
+    def raw_file_names(self) -> Union[str, List[str]]:
+        names = [name for name in os.listdir(self.raw_dir) if name.endswith(('.npz', '.xyz', '.extxyz'))]
+        return names
 
-    drop_last: bool, optional (default: False)
-        set to ``True`` to drop the last incomplete batch,
-        if the dataset size is not divisible by the batch size. If ``False`` and
-        the size of dataset is not divisible by the batch size, then the last batch
-        will be smaller. (default: ``False``)
+    # @property
+    def processed_file_names(self) -> List[str]:
+        return ['data.pt']
 
-    Yields
-    -------
-    BatchDataset: instance of BatchDataset with the all batch data
+    def process(self) -> None:
+        data_list = []
+        data_path = self.processed_paths[0]
+        for raw_path in tqdm(self.raw_paths):
+            if raw_path.endswith('.npz'):
+                data_list.extend(parse_npz(raw_path, self.pre_transform, self.pre_filter, self.precision, self.units))
+            elif raw_path.endswith('.xyz') or raw_path.endswith('.extxyz'):
+                data_list.extend(parse_xyz(raw_path, self.pre_transform, self.pre_filter, self.precision, self.units))
+            
+        self.save(data_list, data_path)
 
-    """
-    n_data = data['R'].shape[0]  # D
-    # n_atoms = data['R'].shape[1]  # A
+def parse_npz(raw_path: str, pre_transform: Callable, pre_filter: Callable, precision: torch.dtype, units: dict) -> List[Data]:
+    data_list = []
+    raw_data = np.load(raw_path)
 
-    # print("number of data w/o augmentation: ", n_data)
-
-
-
-    # # shuffle
-    # if shuffle:
-    #     shuffle_idx = np.arange(n_data)
-    #     carts = carts[shuffle_idx]
-    #     atomic_numbers = atomic_numbers[shuffle_idx]
-    #     energy = energy[shuffle_idx]
-    #     forces = forces[shuffle_idx]
-
-    if isinstance(freeze_rotations, list):
-        thetas = freeze_rotations
-        freeze_rotations = True
+    z = torch.from_numpy(raw_data['Z']).int()
+    pos = torch.from_numpy(raw_data['R']).to(precision)
+    lattice = torch.from_numpy(raw_data['L']).to(precision) if 'L' in raw_data else torch.ones(3, dtype=precision) * torch.inf
+    if lattice.numel() == 3:
+        lattice = lattice.diag()
+    elif lattice.numel() == 9:
+        lattice = lattice.reshape(3, 3)
     else:
-        if freeze_rotations:
-            import itertools
-            theta_gen = itertools.permutations(np.linspace(-np.pi, np.pi, 6), 3) #todo: linspace size
-            thetas = [np.array([0.0, 0.0, 0.0])
-                      ]  # index 0 is reserved for the original data (no rotation)
-            thetas += [
-                np.random.uniform(-np.pi, np.pi, size=3)
-                for _ in range(n_rotations)
-            ]
+        raise ValueError('The lattice must be a single 3x3 matrix for each npz file.')
+    energy = torch.from_numpy(raw_data['E']).to(precision) if 'E' in raw_data else None
+    force = torch.from_numpy(raw_data['F']).to(precision) if 'F' in raw_data else None
 
-    # iterate over data snapshots
-    seen_all_data = 0
-    while True:
+    for i in range(pos.size(0)):
+        data = Data()
+        data.z = z.reshape(-1) if z.dim() < 2 else z[i].reshape(-1)
+        data.pos = pos[i].reshape(-1, 3) * units['length']
+        data.lattice = lattice.reshape(1, 3, 3) * units['length']
+        if energy is not None:
+            data.energy = energy[i].reshape(1) * units['energy']
+        if force is not None:
+            data.force = force[i].reshape(-1, 3) * units['energy'] / units['length']
 
-        # iterate over rotations
-        for r in range(n_rotations + 1):
-
-            # split by batch size and yield
-            data_atom_indices = list(range(n_data))
-
-            if shuffle:
-                np.random.shuffle(data_atom_indices)
-
-            split = 0
-            while (split + 1) * batch_size <= n_data:
-                # Output a batch
-                data_batch_idx = data_atom_indices[split *
-                                                   batch_size:(split + 1) *
-                                                   batch_size]
-                data_batch = {k: standardize_batch(data[k][data_batch_idx]) for k in data if k != "labels"}
-                if "labels" in data:
-                    data_batch["labels"] = [data["labels"][idx] for idx in data_batch_idx]
-                # get neighbors
-                if env_provider is not None:
-                    if 'lattice' in data_batch:
-                        neighbors, neighbor_mask, atom_mask, distances, distance_vectors = \
-                        env_provider.get_environment(data_batch['R'], data_batch['Z'], data_batch['lattice'])
-                    else:
-                        neighbors, neighbor_mask, atom_mask, distances, distance_vectors = \
-                        env_provider.get_environment(data_batch['R'], data_batch['Z'])
-
-                # rotation
-                if r > 0:
-                    if freeze_rotations:
-                        try:
-                            theta = np.array(next(theta_gen))
-                        except:
-                            theta_gen = itertools.permutations(
-                            np.linspace(-np.pi, np.pi, 6), 3)
-                            theta = np.array(next(theta_gen))
-                    else:
-                        theta = np.random.uniform(-np.pi, np.pi, size=3)
-                    rot_atoms = rotate_molecule(data_batch['R'], theta=theta)  # B, A, 3
-                    if distance_vectors is not None:
-                        rot_dist_vec = rotate_molecule(distance_vectors, theta=theta)
-                    if 'F' in data:
-                        rot_forces = rotate_molecule(data_batch['F'], theta=theta)  # B, A, 3
-                else:
-                    if not keep_original:
-                        theta = np.random.uniform(-np.pi, np.pi, size=3)
-                        rot_atoms = rotate_molecule(data_batch['R'], theta=theta)  # B, A, 3
-                        if distance_vectors is not None:
-                            rot_dist_vec = rotate_molecule(distance_vectors, theta=theta)
-                        if 'F' in data:
-                            rot_forces = rotate_molecule(data_batch['F'], theta=theta)  # B, A, 3
-                    else:
-                        theta = np.array([0,0,0])
-                        rot_atoms = data_batch['R']
-                        if 'F' in data:
-                            rot_forces = data_batch['F']
-                        if distance_vectors is not None:
-                            rot_dist_vec = distance_vectors
-
-                RM = np.tile(theta, (rot_atoms.shape[0],1))
-
-                if env_provider is None:
-                    N = None
-                    NM = None
-                    Z = data_batch['Z']
-                    AM = np.zeros_like(Z)
-                    AM[Z != 0] = 1
-                else:
-                    N = neighbors
-                    NM = neighbor_mask
-                    AM = atom_mask
-
-                batch_dataset = {k:v for k,v in data_batch.items()}
-                batch_dataset.update({'R': rot_atoms,  # B,A,3
-                                      'N': N,     # B,A,A-1
-                                      'NM': NM,   # B,A,A-1
-                                      'AM': AM,   # B,A
-                                      'RM': RM    # B,3  rotation angles only
-                                      })
-                if 'F' in data:
-                    batch_dataset.update({'F': rot_forces})
-
-                if distances is not None and distance_vectors is not None:
-                    batch_dataset.update({'D': distances,
-                                          'V': rot_dist_vec})
-
-                # batch_dataset = {
-                #     'R': rot_atoms,   # B,A,3
-                #     'Z': data_batch['Z'], # B,A
-                #     'E': data_batch['E'], # B,1
-                #     'F': rot_forces if 'F' in data else None,    # B,A,3
-                #     'N': N,     # B,A,A-1
-                #     'NM': NM,   # B,A,A-1
-                #     'AM': AM,   # B,A
-                #     'RM': RM    # B,3  rotation angles only
-                # }
-                # batch_dataset = BatchDataset(batch_dataset, device=device)
-                batch_dataset = batch_dataset_converter(batch_dataset, device)
-                yield batch_dataset
-                split += 1
-
-            # Deal with the part smaller than a batch_size
-            left_len = n_data % batch_size
-            if left_len != 0 and drop_last:
-                continue
-
-            elif left_len != 0 and not drop_last:
-                left_idx = data_atom_indices[split * batch_size:]
-                data_batch = {k: standardize_batch(data[k][left_idx]) for k in data for k in data if k != "labels"}
-                if "labels" in data:
-                    data_batch["labels"] = [data["labels"][idx] for idx in left_idx]
-                # get neighbors
-                if env_provider is not None:
-                    if 'lattice' in data:
-                        neighbors, neighbor_mask, atom_mask, distances, distance_vectors = \
-                        env_provider.get_environment(data_batch['R'], data_batch['Z'], data_batch['lattice'])
-                    else:
-                        neighbors, neighbor_mask, atom_mask, distances, distance_vectors = \
-                        env_provider.get_environment(data_batch['R'], data_batch['Z'])
-
-                # rotation
-                if r > 0:
-                    if freeze_rotations:
-                        try:
-                            theta = np.array(next(theta_gen))
-                        except:
-                            theta_gen = itertools.permutations(
-                            np.linspace(-np.pi, np.pi, 6), 3)
-                            theta = np.array(next(theta_gen))
-                    else:
-                        theta = np.random.uniform(-np.pi, np.pi, size=3)
-                    rot_atoms = rotate_molecule(data_batch['R'], theta=theta)  # B, A, 3
-                    if distance_vectors is not None:
-                        rot_dist_vec = rotate_molecule(distance_vectors, theta=theta)
-                    if 'F' in data:
-                        rot_forces = rotate_molecule(data_batch['F'], theta=theta)  # B, A, 3
-                else:
-                    if not keep_original:
-                        theta = np.random.uniform(-np.pi, np.pi, size=3)
-                        rot_atoms = rotate_molecule(data_batch['R'], theta=theta)  # B, A, 3
-                        if distance_vectors is not None:
-                            rot_dist_vec = rotate_molecule(distance_vectors, theta=theta)
-                        if 'F' in data:
-                            rot_forces = rotate_molecule(data_batch['F'], theta=theta)  # B, A, 3
-                    else:
-                        theta = np.array([0,0,0])
-                        rot_atoms = data_batch['R']
-                        if 'F' in data:
-                            rot_forces = data_batch['F']
-                        if distance_vectors is not None:
-                            rot_dist_vec = distance_vectors
-
-                RM = np.tile(theta, (rot_atoms.shape[0],1))
-
-                if env_provider is None:
-                    N = None
-                    NM = None
-                    Z = data_batch['Z']
-                    AM = np.zeros_like(Z)
-                    AM[Z != 0] = 1
-                else:
-                    N = neighbors
-                    NM = neighbor_mask
-                    AM = atom_mask
-
-                batch_dataset = {k:v for k,v in data_batch.items()}
-                batch_dataset.update({'R': rot_atoms,  # B,A,3
-                                      'N': N,     # B,A,A-1
-                                      'NM': NM,   # B,A,A-1
-                                      'AM': AM,   # B,A
-                                      'RM': RM    # B,3  rotation angles only
-                                      })
-
-                if 'F' in data:
-                    batch_dataset.update({'F': rot_forces})
-
-                if distances is not None and distance_vectors is not None:
-                    batch_dataset.update({'D': distances,
-                                          'V': rot_dist_vec})
-
-                # batch_dataset = {
-                #     'R': rot_atoms,
-                #     'Z': data_batch['Z'],
-                #     'E': data_batch['E'],
-                #     'F': rot_forces if 'F' in data else None,
-                #     'N': N,
-                #     'NM': NM,
-                #     'AM': AM,
-                #     'RM': RM
-                # }
-
-                # batch_dataset = BatchDataset(batch_dataset, device)
-                batch_dataset = batch_dataset_converter(batch_dataset, device)
-                yield batch_dataset
-
-            seen_all_data += 1
-            # print('\n# trained on entire data: %i (# rotation: %i)\n'%(seen_all_data, (n_rotations+1)))
-
-
-def extensive_loader_rotwise(
-                           data,
-                           env_provider=None,
-                           batch_size=32,
-                           n_rotations=0,
-                           freeze_rotations=False,
-                           keep_original=True,
-                           device=None,
-                           shuffle=True,
-                           drop_last=False):
-    r"""
-    The main function to load and iterate data based on the extensive environment provider.
-    In this implementation we keep track of all rotations of a data point (compared to `extensive_train_loader`)
-
-    Parameters
-    ----------
-    data: dict
-        dictionary of arrays with following keys:
-            - 'R':positions
-            - 'Z':atomic_numbers
-            - 'E':energy
-            - 'F':forces
-
-    env_provider: ShellProvider
-        the instance of combust.data.ExtensiveEnvironment
-
-    batch_size: int, optional (default: 32)
-        The size of output tensors
-
-    n_rotations: int, optional (default: 0)
-        Number of times to rotate voxel boxes for data augmentation.
-        If zero, the original orientation will be used.
-
-    freeze_rotations: bool, optional (default: False)
-        If True rotation angles will be determined and fixed during generation.
-
-    keep_original: bool, optional (default: True)
-        If True, the original orientation of data is kept in each epoch
-
-    device: torch.device
-        either cpu or gpu (cuda) device.
-
-    shuffle: bool, optional (default: True)
-        If ``True``, shuffle the list of file path and batch indices between iterations.
-
-    drop_last: bool, optional (default: False)
-        set to ``True`` to drop the last incomplete batch,
-        if the dataset size is not divisible by the batch size. If ``False`` and
-        the size of dataset is not divisible by the batch size, then the last batch
-        will be smaller. (default: ``False``)
-
-    Yields
-    -------
-    BatchDataset: instance of BatchDataset with the all batch data
-
-    """
-    n_data = data['R'].shape[0]  # D
-    n_atoms = data['R'].shape[1]  # A
-
-    # print("number of data w/o augmentation: ", n_data)
-
-    # get neighbors
-    if env_provider is not None:
-        neighbors, neighbor_mask, atom_mask = env_provider.get_environment(data['R'], data['Z'])
-
-    # # shuffle
-    # if shuffle:
-    #     shuffle_idx = np.arange(n_data)
-    #     carts = carts[shuffle_idx]
-    #     atomic_numbers = atomic_numbers[shuffle_idx]
-    #     energy = energy[shuffle_idx]
-    #     forces = forces[shuffle_idx]
-
-    if isinstance(freeze_rotations, list):
-        thetas = freeze_rotations
-        freeze_rotations = True
-    else:
-        if freeze_rotations:
-            thetas = [np.array([0.0, 0.0, 0.0])
-                      ]  # index 0 is reserved for the original data (no rotation)
-            thetas += [
-                np.random.uniform(-np.pi, np.pi, size=3)
-                for _ in range(n_rotations)
-            ]
-
-    # iterate over data snapshots
-    seen_all_data = 0
-    while True:
-
-        # split by batch size and yield
-        data_atom_indices = list(range(n_data))
-
-        if shuffle:
-            np.random.shuffle(data_atom_indices)
-
-        split = 0
-        while (split + 1) * batch_size <= n_data:
-            # Output a batch
-            data_batch_idx = data_atom_indices[split *
-                                               batch_size:(split + 1) *
-                                               batch_size]
-
-            # rotation
-            if not freeze_rotations:
-                if keep_original:
-                    thetas = np.random.uniform(-np.pi, np.pi, size=(n_rotations, 3))
-                    thetas = [np.array([0,0,0])] + list(thetas)
-                else:
-                    thetas = np.random.uniform(-np.pi, np.pi, size=(n_rotations+1, 3))
-
-            # stack all rotations
-            Rs=[]; Fs=[]; RMs=[]
-            for theta in thetas:
-                rot_atoms = rotate_molecule(data['R'][data_batch_idx], theta=theta)  # B, A, 3
-                # rot_forces = rotate_molecule(data['F'][data_batch_idx], theta=theta)  # B, A, 3
-                rot_matrix = euler_rotation_matrix(theta)   # 3,3
-
-                Rs.append(rot_atoms)
-                # Fs.append(rot_forces)
-                RMs.append(rot_matrix)
-
-            rot_atoms = np.stack(Rs, axis=1)  # B,n_rot,A,3
-            rsize = rot_atoms.shape
-            rot_atoms = rot_atoms.reshape(rsize[0]*rsize[1], rsize[2], rsize[3]) # B*n_rot, A, 3
-            # rot_forces= np.stack(Fs, axis=1)  # B,n_rot,A,3
-            # rot_forces= rot_forces.reshape(rsize[0]*rsize[1], rsize[2], rsize[3]) # B*n_rot, A, 3
-
-            RM = np.stack(RMs, axis=0)  # n_rot,3,3
-            RM = np.tile(RM, (rsize[0], 1, 1, 1))    # B, n_rot, 3, 3
-
-            if env_provider is None:
-                N = None
-                NM = None
-                E = data['E'][data_batch_idx]  # B,1
-                # E = np.tile(E, (1, n_rotations + 1)).reshape(E.shape[0] * (n_rotations + 1), E.shape[1])  # B*n_rot,1
-
-                Z = data['Z'][data_batch_idx]  # B,A
-                Z = np.tile(Z, (1,n_rotations+1)).reshape(Z.shape[0],n_rotations+1,Z.shape[1]) # B,n_rot,A
-
-                AM = np.zeros_like(Z)   # B,n_rot,A
-                AM[Z != 0] = 1
-                RM = RM
-
-            else:
-                E = data['E'][data_batch_idx]  # B,1
-                # E = np.tile(E, (1, n_rotations + 1)).reshape(E.shape[0] * (n_rotations + 1), E.shape[1])  # B*n_rot,1
-
-                Z = data['Z'][data_batch_idx]  # B,A
-                Z = np.tile(Z, (1,n_rotations+1)).reshape(Z.shape[0]*(n_rotations+1),Z.shape[1]) # B*n_rot,A
-
-                N = neighbors[data_batch_idx]  # B,A,A-1
-                N = np.tile(N, (1,n_rotations+1,1)).reshape(N.shape[0]*(n_rotations+1),N.shape[1], N.shape[2]) # B*n_rot,A,A-1
-
-                NM = neighbor_mask[data_batch_idx]  # B,A,A-1
-                NM = np.tile(NM, (1,n_rotations+1,1)).reshape(NM.shape[0]*(n_rotations+1),NM.shape[1], NM.shape[2]) # B*n_rot,A,A-1
-
-                AM = atom_mask[data_batch_idx]   # B,A
-                AM = np.tile(AM, (1,n_rotations+1)).reshape(AM.shape[0]*(n_rotations+1),AM.shape[1]) # B*n_rot,A
-
-                # rotation mask
-                # B = rsize[0]; n_rot=rsize[1]
-                # RotM = np.eye(B)
-                # RotM = np.tile(RotM, (1, n_rot)).reshape(B*n_rot, B)
-
-                RM = RM
-
-            batch_dataset = {
-                'R': rot_atoms,   # B,A,3
-                'Z': Z, # B,A
-                'E': E, # B,1
-                'F': data['F'][data_batch_idx],    # B,A,3
-                'N': N,     # B,A,A-1
-                'NM': NM,   # B,A,A-1
-                'AM': AM,   # B,A
-                'RM': RM
-            }
-
-            # batch_dataset = BatchDataset(batch_dataset, device=device)
-            batch_dataset = batch_dataset_converter(batch_dataset, device)
-            yield batch_dataset
-            split += 1
-
-        # Deal with the part smaller than a batch_size
-        left_len = n_data % batch_size
-        if left_len != 0 and drop_last:
+        if pre_filter is not None and not pre_filter(data):
             continue
+        if pre_transform is not None:
+            data = pre_transform(data)
+        data_list.append(data)
 
-        elif left_len != 0 and not drop_last:
-            left_idx = data_atom_indices[split * batch_size:]
+    return data_list
 
-            # rotation
-            if not freeze_rotations:
-                if keep_original:
-                    thetas = np.random.uniform(-np.pi, np.pi, size=(n_rotations, 3))
-                    thetas = [np.array([0,0,0])] + list(thetas)
-                else:
-                    thetas = np.random.uniform(-np.pi, np.pi, size=(n_rotations+1, 3))
+def parse_xyz(raw_path: str, pre_transform: Callable, pre_filter: Callable, precision: torch.dtype, units: dict) -> List[Data]:
+    data_list = []
+    atoms_list = ase.io.read(raw_path, index=':')
 
-            # stack all rotations
-            Rs=[]; Fs=[]; RMs=[]
-            for theta in thetas:
-                rot_atoms = rotate_molecule(data['R'][left_idx], theta=theta)  # B, A, 3
-                # rot_forces = rotate_molecule(data['F'][left_idx], theta=theta)  # B, A, 3
-                rot_matrix = euler_rotation_matrix(theta)   # 3,3
+    for atoms in atoms_list:
+        atoms.set_constraint()
+        z = torch.from_numpy(atoms.get_atomic_numbers()).int()
+        pos = torch.from_numpy(atoms.get_positions(wrap=True)).to(precision)
+        lattice = torch.from_numpy(atoms.get_cell().array).to(precision)
+        lattice[lattice.norm(dim=-1) < 1e-3] = torch.inf
+        lattice[~atoms.get_pbc()] = torch.inf
+        energy = torch.tensor(atoms.get_potential_energy(), dtype=precision)
+        forces = torch.from_numpy(atoms.get_forces()).to(precision)
 
-                Rs.append(rot_atoms)
-                # Fs.append(rot_forces)
-                RMs.append(rot_matrix)
+        data = Data()
+        data.z = z.reshape(-1)
+        data.pos = pos.reshape(-1, 3) * units['length']
+        data.lattice = lattice.reshape(1, 3, 3) * units['length']
+        data.energy = energy.reshape(1) * units['energy']
+        data.force = forces.reshape(-1, 3) * units['energy'] / units['length']
 
-            rot_atoms = np.stack(Rs, axis=1)  # B,n_rot,A,3
-            rsize = rot_atoms.shape
-            rot_atoms = rot_atoms.reshape(rsize[0]*rsize[1], rsize[2], rsize[3]) # B*n_rot, A, 3
-            # rot_forces= np.stack(Fs, axis=1)  # B,n_rot,A,3
-            # rot_forces= rot_forces.reshape(rsize[0]*rsize[1], rsize[2], rsize[3]) # B*n_rot, A, 3
-
-            RM = np.stack(RMs, axis=0)  # n_rot,3,3
-            RM = np.tile(RM, (rsize[0], 1, 1, 1))    # B, n_rot, 3, 3
-
-            if env_provider is None:
-                N = None
-                NM = None
-
-                E = data['E'][left_idx]  # B,1
-                # E = np.tile(E, (1,n_rotations+1)).reshape(E.shape[0]*(n_rotations+1),E.shape[1]) # B*n_rot,1
-
-                Z = data['Z'][left_idx]
-                Z = np.tile(Z, (1,n_rotations+1)).reshape(Z.shape[0]*(n_rotations+1),Z.shape[1]) # B*n_rot,A
-
-                AM = np.zeros_like(Z)
-                AM[Z != 0] = 1
-                RM = RM
-            else:
-                E = data['E'][left_idx]  # B,1
-                # E = np.tile(E, (1,n_rotations+1)).reshape(E.shape[0]*(n_rotations+1),E.shape[1]) # B*n_rot,1
-
-                Z = data['Z'][left_idx]  # B,A
-                Z = np.tile(Z, (1,n_rotations+1)).reshape(Z.shape[0]*(n_rotations+1),Z.shape[1]) # B*n_rot,A
-
-                N = neighbors[left_idx]  # B,A,A-1
-                N = np.tile(N, (1,n_rotations+1,1)).reshape(N.shape[0]*(n_rotations+1),N.shape[1], N.shape[2]) # B*n_rot,A,A-1
-
-                NM = neighbor_mask[left_idx]  # B,A,A-1
-                NM = np.tile(NM, (1,n_rotations+1,1)).reshape(NM.shape[0]*(n_rotations+1),NM.shape[1], NM.shape[2]) # B*n_rot,A,A-1
-
-                AM = atom_mask[left_idx]   # B,A
-                AM = np.tile(AM, (1,n_rotations+1)).reshape(AM.shape[0]*(n_rotations+1),AM.shape[1]) # B*n_rot,A
-
-                RM = RM
-
-            batch_dataset = {
-                'R': rot_atoms,
-                'Z': Z,
-                'E': E,
-                'F': data['F'][left_idx],
-                'N': N,
-                'NM': NM,
-                'AM': AM,
-                'RM': RM
-            }
-
-            # batch_dataset = BatchDataset(batch_dataset, device)
-            batch_dataset = batch_dataset_converter(batch_dataset, device)
-            yield batch_dataset
-
-        seen_all_data += 1
-        # print('\n# trained on entire data: %i (# rotation: %i)\n'%(seen_all_data, (n_rotations+1)))
-
-def extensive_voxel_loader(data,
-                           env_provider=None,
-                           batch_size=32,
-                           device=None,
-                           shuffle=True,
-                           drop_last=False):
-    r"""
-    The main function to load and iterate data based on the extensive environment provider.
-
-    Parameters
-    ----------
-    data: dict
-        dictionary of arrays with following keys:
-            - 'R':positions
-            - 'Z':atomic_numbers
-            - 'E':energy
-            - 'F':forces
-
-    env_provider: ShellProvider
-        the instance of combust.data.ExtensiveEnvironment
-
-    batch_size: int, optional (default: 32)
-        The size of output tensors
-
-    device: torch.device
-        either cpu or gpu (cuda) device.
-
-    shuffle: bool, optional (default: True)
-        If ``True``, shuffle the list of file path and batch indices between iterations.
-
-    drop_last: bool, optional (default: False)
-        set to ``True`` to drop the last incomplete batch,
-        if the dataset size is not divisible by the batch size. If ``False`` and
-        the size of dataset is not divisible by the batch size, then the last batch
-        will be smaller. (default: ``False``)
-
-    Yields
-    -------
-    BatchDataset: instance of BatchDataset with the all batch data
-
-    """
-    n_data = data['R'].shape[0]  # D
-    n_atoms = data['R'].shape[1]  # A
-
-    # print("number of data w/o augmentation: ", n_data)
-
-    # get neighbors
-    if env_provider is not None:
-        neighbors, neighbor_mask, atom_mask = env_provider.get_environment(data['R'], data['Z'])
-
-    # iterate over data snapshots
-    seen_all_data = 0
-    while True:
-        # split by batch size and yield
-        data_atom_indices = list(range(n_data))
-
-        if shuffle:
-            np.random.shuffle(data_atom_indices)
-
-        split = 0
-        while (split + 1) * batch_size <= n_data:
-            # Output a batch
-            data_batch_idx = data_atom_indices[split *
-                                               batch_size:(split + 1) *
-                                               batch_size]
-
-            if env_provider is None:
-                N = None
-                NM = None
-                Z = data['Z'][data_batch_idx]
-                AM = np.zeros_like(Z)
-                AM[Z != 0] = 1
-                thetas = np.random.uniform(-np.pi, np.pi, size=(Z.shape[0],3))
-                RM = np.array([euler_rotation_matrix(t) for t in thetas])
-            else:
-                N = neighbors[data_batch_idx]
-                NM = neighbor_mask[data_batch_idx]
-                AM = atom_mask[data_batch_idx]
-                RM = None
-
-
-            batch_dataset = {
-                'R': data['R'][data_batch_idx],
-                'Z': data['Z'][data_batch_idx],
-                'E': data['E'][data_batch_idx],
-                'F': data['F'][data_batch_idx],
-                'N': N,
-                'NM': NM,
-                'AM': AM,
-                'RM': RM
-            }
-            # batch_dataset = BatchDataset(batch_dataset, device=device)
-            batch_dataset = batch_dataset_converter(batch_dataset, device)
-            yield batch_dataset
-            split += 1
-
-        # Deal with the part smaller than a batch_size
-        left_len = n_data % batch_size
-        if left_len != 0 and drop_last:
+        if pre_filter is not None and not pre_filter(data):
             continue
+        if pre_transform is not None:
+            data = pre_transform(data)
+        data_list.append(data)
 
-        elif left_len != 0 and not drop_last:
-
-            left_idx = data_atom_indices[split * batch_size:]
-
-            if env_provider is None:
-                N = None
-                NM = None
-                Z = data['Z'][left_idx]
-                AM = np.zeros_like(Z)
-                AM[Z != 0] = 1
-                thetas = np.random.uniform(-np.pi, np.pi, size=(Z.shape[0],3))
-                RM = np.array([euler_rotation_matrix(t) for t in thetas])
-            else:
-                N = neighbors[left_idx]
-                NM = neighbor_mask[left_idx]
-                AM = atom_mask[left_idx]
-                RM = None
-
-            batch_dataset = {
-                'R': data['R'][left_idx],
-                'Z': data['Z'][left_idx],
-                'E': data['E'][left_idx],
-                'F': data['F'][left_idx],
-                'N': N,
-                'NM': NM,
-                'AM': AM,
-                'RM': RM
-            }
-
-            # batch_dataset = BatchDataset(batch_dataset, device)
-            batch_dataset = batch_dataset_converter(batch_dataset, device)
-            yield batch_dataset
-
-            seen_all_data += 1
-            # print('\n# trained on entire data: %i (# rotation: %i)\n'%(seen_all_data, (n_rotations+1)))
+    return data_list
 
 
+class MolecularStatistics(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, data):
+        stats = {}
+
+        z = data.z.long().cpu()
+        z_unique = z.unique()
+        # stats['z'] = z_unique
+
+        batch = data.batch.cpu()
+
+        try:
+            energy = data.energy.cpu()
+            formula = scatter(nn.functional.one_hot(z), batch, dim=0).to(energy.dtype)
+            solution = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
+            energy_shifts = torch.zeros(118 + 1, dtype=energy.dtype, device=energy.device)
+            energy_shifts[z_unique] = solution[z_unique]
+            stds = ((energy - torch.matmul(formula, solution)).square().sum() / (formula).sum()).sqrt()
+            energy_scale = torch.ones(118 + 1, dtype=energy.dtype, device=energy.device)
+            energy_scale[z_unique] = stds
+            stats['energy'] = {'shift': energy_shifts, 'scale': energy_scale}
+        except AttributeError:
+            pass
+        try:
+            force = data.force.norm(dim=-1).cpu()
+            means = scatter(force, z, reduce='mean')
+            force_scale = torch.ones(118 + 1, dtype=force.dtype, device=force.device)
+            force_scale[z_unique] = means[z_unique]
+            stats['force'] = {'scale': force_scale}
+        except AttributeError:
+            pass
+        return stats

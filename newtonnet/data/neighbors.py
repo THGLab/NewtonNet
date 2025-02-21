@@ -1,233 +1,84 @@
-"""
-A compilation of modules that help to find closest neighbours of each atom in a molecule.
-Each Molecule is represented as a dictionary with following keys:
-    - atoms: atomic positions with shape (n_atom, 3)
-    - z: atomic numbers with shape (n_atoms, 1)
-    - cell: unit cell with shape (3,3)
-    - atom_prop: atomic property with shape (n_atoms, n_atomic_prop)
-    - mol_prop: molecular property with shape (1, n_mol_prop)
+import torch
+from torch_geometric.data import Data
+from torch_geometric.transforms import BaseTransform
+from torch_geometric.nn import radius_graph
 
-"""
-import numpy as np
-from ase import Atoms
-from ase.neighborlist import neighbor_list
+class RadiusGraph(BaseTransform):
+    r"""Creates edges based on node positions :obj:`data.pos` to all points
+    within a given distance (functional name: :obj:`radius_graph`).
 
-from newtonnet.utils import padaxis
-
-class ExtensiveEnvironment(object):
+    Args:
+        r (float): The distance.
+        loop (bool, optional): If :obj:`True`, the graph will contain
+            self-loops. (default: :obj:`False`)
+        flow (str, optional): The flow direction when using in combination with
+            message passing (:obj:`"source_to_target"` or
+            :obj:`"target_to_source"`). (default: :obj:`"source_to_target"`)
+        num_workers (int): Number of workers to use for computation. Has no
+            effect in case :obj:`batch` is not :obj:`None`, or the input lies
+            on the GPU. (default: :obj:`1`)
     """
-    Provide atomic environment of an array of atoms and their atomic numbers.
-    No cutoff, No periodic boundary condition
+    def __init__(
+        self,
+        r: float,
+        loop: bool = False,
+        flow: str = 'source_to_target',
+        num_workers: int = 1,
+    ) -> None:
+        self.r = r
+        self.loop = loop
+        self.max_num_neighbors = 1024
+        self.flow = flow
+        self.num_workers = num_workers
 
-    Parameters
-    ----------
-    max_n_neighbors: int, optional (default: None)
-        maximum number of neighbors to pad arrays if they have less elements
-        if None, it will be ignored (e.g., in case all atoms have same length)
+    def forward(self, data: Data) -> Data:
+        assert data.pos is not None
 
-    """
-    def __init__(self, max_n_neighbors=None):
-        if max_n_neighbors is None:
-            max_n_neighbors = 0
-        self.max_n_neighbors = max_n_neighbors
+        if data.lattice is not None and data.lattice.max(dim=-1).values.isfinite().any():
+            n_cell = (self.r / data.lattice.norm(dim=-1)).ceil().int().flatten()
+            assert len(n_cell) == 3
+            n_cell_tot = (2 * n_cell + 1).prod()
+            shift = torch.tensor([[i, j, k] for i in range(-n_cell[0], n_cell[0] + 1) for j in range(-n_cell[1], n_cell[1] + 1) for k in range(-n_cell[2], n_cell[2] + 1)], dtype=data.pos.dtype, device=data.pos.device)
+            shift = shift @ data.lattice
+            shift = shift.nan_to_num()
+            shifted_pos = data.pos[:, None, :] + shift  # shape: (n_node, n_cell_tot, 3)
+            shifted_pos = shifted_pos.reshape(-1, 3)  # shape: (n_node * n_cell_tot, 3)
+            shifted_node_index = torch.arange(data.pos.shape[0], dtype=torch.long, device=data.pos.device)[:, None].repeat(1, n_cell_tot)  # shape: (n_node, n_cell_tot)
+            shifted_node_index = shifted_node_index.reshape(-1)  # shape: (n_node * n_cell_tot)
+            shifted_node_isoriginal = torch.zeros(data.pos.shape[0], n_cell_tot, dtype=torch.bool, device=data.pos.device)  # shape: (n_node, n_cell_tot)
+            shifted_node_isoriginal[:, n_cell_tot // 2] = True
+            shifted_node_isoriginal = shifted_node_isoriginal.reshape(-1)  # shape: (n_node * n_cell_tot)
+            if data.batch is not None:
+                shifted_batch = data.batch[:, None].repeat(1, n_cell_tot)  # shape: (n_node, n_cell_tot)
+                shifted_batch = shifted_batch.reshape(-1)  # shape: (n_node * n_cell_tot)
+            else:
+                shifted_batch = None
+            shifted_edge_index = radius_graph(
+                shifted_pos,
+                self.r,
+                shifted_batch,
+                self.loop,
+                max_num_neighbors=self.max_num_neighbors,
+                flow=self.flow,
+                num_workers=self.num_workers,
+            )#.sort(dim=0)[0].unique(dim=1)
+            shifted_edge_isoriginal = shifted_node_isoriginal[shifted_edge_index[0]]
+            shifted_edge_index = shifted_edge_index[:, shifted_edge_isoriginal]
+            data.edge_index = shifted_node_index[shifted_edge_index]
+            data.disp = shifted_pos[shifted_edge_index[0]] - shifted_pos[shifted_edge_index[1]]
+        else:
+            data.edge_index = radius_graph(
+                data.pos,
+                self.r,
+                data.batch,
+                self.loop,
+                max_num_neighbors=self.max_num_neighbors,
+                flow=self.flow,
+                num_workers=self.num_workers,
+            )#.sort(dim=0)[0].unique(dim=1)
+            data.disp = data.pos[data.edge_index[0]] - data.pos[data.edge_index[1]]
 
-    def _check_shapes(self, Rshape, Zshape):
-        if Rshape[0] != Zshape[0]:
-            msg = "@ExtensiveEnvironment: atoms and atomic_numbers must have same dimension 0 (n_data)."
-            raise ValueError(msg)
+        return data
 
-        if Rshape[2] != 3:
-            msg = "@ExtensiveEnvironment: atoms must have 3 coordinates at dimension 2."
-            raise ValueError(msg)
-
-        if Rshape[1] != Zshape[1]:
-            msg = "@ExtensiveEnvironment: atoms and atomic_numbers must have same dimension 1 (n_atoms)."
-            raise ValueError(msg)
-
-    def get_environment(self, positions, atomic_numbers):
-        """
-        This function finds atomic environments extensively for each atom in the MD snapshot.
-
-        Parameters
-        ----------
-        positions: ndarray
-            A 3D array of atomic positions in XYZ coordinates with shape (D, A, 3), where
-            D is number of snapshots of data and A is number of atoms per data point
-
-        atomic_numbers: ndarray
-            A 2D array of atomic numbers with shape (D, A)
-
-        Returns
-        -------
-        ndarray: 3D array of neighbors with shape (D, A, A-1)
-        ndarray: 3D array of neighbor mask with shape (D, A, A-1)
-        ndarray: 2D array of atomic mask for atomic energies (D, A)
-
-        """
-        n_data = positions.shape[0]  # D
-        n_atoms = positions.shape[1]  # A
-
-        self._check_shapes(positions.shape, atomic_numbers.shape)
-
-        # 2d array of all indices for all atoms in a single data point
-        N = np.tile(np.arange(n_atoms), (n_atoms, 1))  # (A, A)
-
-        # remove the diagonal self indices
-        neighbors = N[~np.eye(n_atoms, dtype=bool)].reshape(n_atoms,
-                                                        -1)  # (A, A-1)
-        neighbors = np.repeat(neighbors[np.newaxis, ...], n_data, axis=0)  # (D, A, A-1)
-
-        # mask based on zero atomic_numbers
-        mask = np.ones_like(atomic_numbers)                 #(D, A)
-        mask[np.where(atomic_numbers == 0)] = 0
-        max_atoms = np.sum(mask, axis=1)
-
-        neighbor_mask = (neighbors < np.tile(max_atoms.reshape(-1,1), n_atoms-1)[:,None,:]).astype('int')
-        neighbor_mask *= mask[:,:,None]  # (D,A,A-1)
-        neighbors *= neighbor_mask  # (D,A,A-1)
-
-        # atomic numbers
-        # atomic numbers are already in correct shape
-
-        if n_atoms < self.max_n_neighbors:
-            neighbors = padaxis(neighbors,
-                                self.max_n_neighbors,
-                                axis=-1,
-                                pad_value=-1)  # (D, A, N)
-            atomic_numbers = padaxis(atomic_numbers,
-                                     self.max_n_neighbors,
-                                     axis=-1,
-                                     pad_value=0)  # (D, A, N)
-
-        return neighbors, neighbor_mask, mask, None, None
-
-
-class PeriodicEnvironment(object):
-    """
-    Provide atomic environment of an array of atoms and their atomic numbers with cutoff and periodic boundary condition.
-
-
-    Parameters
-    ----------
-    max_n_neighbors: int, optional (default: None)
-        maximum number of neighbors to pad arrays if they have less elements
-        if None, it will be ignored (e.g., in case all atoms have same length)
-
-    cutoff: float
-        the cutoff value to be used for finding neighbors
-    """
-    def __init__(self, max_n_neighbors=None, cutoff=7.0):
-        if max_n_neighbors is None:
-            max_n_neighbors = 0
-        self.max_n_neighbors = max_n_neighbors
-        self.cutoff = cutoff
-
-    def _check_shapes(self, Rshape, Zshape):
-        if Rshape[0] != Zshape[0]:
-            msg = "@PeriodicEnvironment: atoms and atomic_numbers must have same dimension 0 (n_data)."
-            raise ValueError(msg)
-
-        if Rshape[2] != 3:
-            msg = "@PeriodicEnvironment: atoms must have 3 coordinates at dimension 2."
-            raise ValueError(msg)
-
-        if Rshape[1] != Zshape[1]:
-            msg = "@PeriodicEnvironment: atoms and atomic_numbers must have same dimension 1 (n_atoms)."
-            raise ValueError(msg)
-
-    def get_environment(self, positions, atomic_numbers, lattice):
-        """
-        This function finds atomic environments extensively for each atom in the MD snapshot using the ASE package.
-
-        Parameters
-        ----------
-        positions: ndarray
-            A 3D array of atomic positions in XYZ coordinates with shape (D, A, 3), where
-            D is number of snapshots of data and A is number of atoms per data point
-
-        atomic_numbers: ndarray
-            A 2D array of atomic numbers with shape (D, A)
-
-        lattice: ndarray
-            A 2D array with shape (D, 9), where the second axis can be reshaped into (3x3) that 
-            represents the 3 lattice vectors 
-
-        Returns
-        -------
-        ndarray: 3D array of neighbors with shape (D, A, N), where N is either the maximum number of neighbors in 
-            current batch of data, or the predefined max_n_neighbors
-        ndarray: 3D array of neighbor mask with shape (D, A, N)
-        ndarray: 2D array of atomic mask for atomic energies (D, A)
-        ndarray: 3D array of neighbor distances with shape (D, A, N)
-        ndarray: 4D array of neighbor atom arrays with shape (D, A, N, 3)
-        """
-        n_data = positions.shape[0]  # D
-        n_atoms = positions.shape[1]  # A
-        lattice = lattice.reshape((-1, 3, 3))
-
-        self._check_shapes(positions.shape, atomic_numbers.shape)
-
-        staggered_neighbors = [[[] for _ in range(n_atoms)] for _ in range(n_data)]
-        staggered_distances = [[[] for _ in range(n_atoms)] for _ in range(n_data)]
-        staggered_distance_vectors = [[[] for _ in range(n_atoms)] for _ in range(n_data)]
-        neighbor_count = np.zeros((n_data, n_atoms), dtype=int)
-
-        # mask based on zero atomic_numbers
-        mask = np.ones_like(atomic_numbers)                 #(D, A)
-        mask[np.where(atomic_numbers == 0)] = 0
-
-        for idx_data in range(n_data):
-            molecule_Rs = positions[idx_data, mask[idx_data] == 1]
-            molecule_Zs = atomic_numbers[idx_data, mask[idx_data] == 1]
-            molecule_lattice = lattice[idx_data]
-
-            ase_molecule = Atoms(molecule_Zs, positions=molecule_Rs, cell=molecule_lattice, pbc=True)
-            for i, j, dist, vec in zip(*neighbor_list("ijdD", ase_molecule, self.cutoff)):
-                staggered_neighbors[idx_data][i].append(j)
-                staggered_distances[idx_data][i].append(dist)
-                staggered_distance_vectors[idx_data][i].append(vec)
-                neighbor_count[idx_data][i] += 1
-
-        max_N = np.max(neighbor_count.max(), self.max_n_neighbors)
-        neighbors = np.zeros((n_data, n_atoms, max_N))
-        distances = np.zeros((n_data, n_atoms, max_N))
-        distance_vectors = np.zeros((n_data, n_atoms, max_N, 3))
-        neighbor_mask = np.zeros((n_data, n_atoms, max_N))
-
-        for i in range(n_data):
-            for j in range(n_atoms):
-                if neighbor_count[i, j] > 0:
-                    neighbors[i, j, :neighbor_count[i, j]] = staggered_neighbors[i][j]
-                    distances[i, j, :neighbor_count[i, j]] = staggered_distances[i][j]
-                    distance_vectors[i, j, :neighbor_count[i, j]] = staggered_distance_vectors[i][j]
-                    neighbor_mask[i, j, :neighbor_count[i, j]] = 1
-
-
-        # # 2d array of all indices for all atoms in a single data point
-        # N = np.tile(np.arange(n_atoms), (n_atoms, 1))  # (A, A)
-
-        # # remove the diagonal self indices
-        # neighbors = N[~np.eye(n_atoms, dtype=bool)].reshape(n_atoms,
-        #                                                 -1)  # (A, A-1)
-        # neighbors = np.repeat(neighbors[np.newaxis, ...], n_data, axis=0)  # (D, A, A-1)
-
-        # max_atoms = np.sum(mask, axis=1)
-
-        # neighbor_mask = (neighbors < np.tile(max_atoms.reshape(-1,1), n_atoms-1)[:,None,:]).astype('int')
-        # neighbor_mask *= mask[:,:,None]  # (D,A,A-1)
-        # neighbors *= neighbor_mask  # (D,A,A-1)
-
-        # # atomic numbers
-        # # atomic numbers are already in correct shape
-
-        # if n_atoms < self.max_n_neighbors:
-        #     neighbors = padaxis(neighbors,
-        #                         self.max_n_neighbors,
-        #                         axis=-1,
-        #                         pad_value=-1)  # (D, A, N)
-        #     atomic_numbers = padaxis(atomic_numbers,
-        #                              self.max_n_neighbors,
-        #                              axis=-1,
-        #                              pad_value=0)  # (D, A, N)
-
-        return neighbors, neighbor_mask, mask, distances, distance_vectors
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__}(r={self.r})'

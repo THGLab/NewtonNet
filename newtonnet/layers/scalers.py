@@ -1,94 +1,75 @@
 import torch
 from torch import nn
+from torch_geometric.utils import scatter
 
+
+def get_scaler_by_string(key):
+    if key == 'energy':
+        scaler = ScaleShift(scale=True, shift=True)
+    elif key == 'gradient_force':
+        scaler = ScaleShift(scale=False, shift=False)
+    elif key == 'direct_force':
+        scaler = ScaleShift(scale=True, shift=False)
+    elif key == 'hessian':
+        scaler = ScaleShift(scale=False, shift=False)
+    elif key == 'virial':
+        scaler = ScaleShift(scale=False, shift=False)
+    else:
+        raise NotImplementedError(f'Scaler type {key} is not implemented yet')
+    return scaler
+
+def set_scaler_by_string(key, scaler, stats, fit_scale=True, fit_shift=True):
+    if key == 'energy':
+        if fit_scale:
+            scaler.set_scale(stats['energy']['scale'])
+        if fit_shift:
+            scaler.set_shift(stats['energy']['shift'])
+    elif key == 'gradient_force':
+        pass
+    elif key == 'direct_force':
+        if fit_scale:
+            scaler.set_scale(stats['force']['scale'])
+    # elif scaler.key == 'hessian':
+    #     pass
+    else:
+        raise NotImplementedError(f'Scaler type {key} is not implemented yet')
+    return scaler
 
 class ScaleShift(nn.Module):
-    r"""Scale and shift layer for standardization.
+    '''
+    Node-level scale and shift layer.
+    
+    Parameters:
+        key (str): The key for the scaler
+        scale (bool): Whether to scale the output.
+        shift (bool): Whether to shift the output.
+    '''
+    def __init__(self, scale=True, shift=True):
+        super().__init__()
+        self.scale = nn.Embedding.from_pretrained(torch.ones(118 + 1, 1), freeze=False, padding_idx=0) if scale else None
+        self.shift = nn.Embedding.from_pretrained(torch.zeros(118 + 1, 1), freeze=False, padding_idx=0) if shift else None
 
-    Credit : https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py under the MIT License.
+    def forward(self, output, outputs):
+        '''
+        Scale and shift input.
 
-    .. math::
-       y = x \times \sigma + \mu
+        Args:
+            output (torch.Tensor): The output values.
+            outputs (Data): Other output data.
+        '''
+        if self.scale is not None:
+            output = output * self.scale(outputs.z)
+        if self.shift is not None:
+            output = output + self.shift(outputs.z)
+        return output
+    
+    def set_scale(self, scale):
+        self.scale.weight.data = scale.reshape(-1, 1)
 
-    Parameters
-    ----------
-    mean: torch.Tensor
-        mean value :math:`\mu`.
+    def set_shift(self, shift):
+        self.shift.weight.data = shift.reshape(-1, 1)
 
-    stddev: torch.Tensor
-        standard deviation value :math:`\sigma`.
-
-    Copyright: https://github.com/atomistic-machine-learning/schnetpack/blob/master/src/schnetpack/nn/base.py
-    """
-    def __init__(self, mean, stddev):
-        super(ScaleShift, self).__init__()
-        self.register_buffer("mean", mean)
-        self.register_buffer("stddev", stddev)
-
-    def forward(self, input):
-        """Compute layer output.
-
-        Parameters
-        ----------
-        input: torch.Tensor
-            input data.
-
-        Returns
-        -------
-        torch.Tensor: layer output.
-
-        """
-        y = input * self.stddev + self.mean
-        return y
-
-
-class TrainableScaleShift(nn.Module):
-    r"""Trainable scale and shift layer for standardization. Each atom type uses its dedicated scale and shift values
-
-    .. math::
-       y = x \times \sigma + \mu
-
-    Parameters
-    ----------
-    max_z: the maximum atomic number for the molecule
-    mean: torch.Tensor
-        mean value :math:`\mu`.
-
-    stddev: torch.Tensor
-        standard deviation value :math:`\sigma`.
-
-    """
-    def __init__(self, max_z, initial_mean=None, initial_stddev=None):
-        super(TrainableScaleShift, self).__init__()
-        if initial_mean is not None:
-            mean = nn.Parameter(torch.zeros(max_z) + initial_mean, requires_grad=True)
-        else:
-            mean = nn.Parameter(torch.zeros(max_z), requires_grad=True)
-        if initial_stddev is not None:
-            stddev = nn.Parameter(torch.ones(max_z) * initial_stddev, requires_grad=True)
-        else:
-            stddev = nn.Parameter(torch.ones(max_z), requires_grad=True)
-        self.register_parameter('mean', mean)
-        self.register_parameter('stddev', stddev)
-
-
-    def forward(self, input_energies, z):
-        """Compute layer output.
-
-        Parameters
-        ----------
-        input_energies: torch.Tensor
-            input atomic energies.
-
-        z: torch.Tensor
-            input atomic numbers
-
-        Returns
-        -------
-        torch.Tensor: layer output.
-
-        """
-        selected_mean = self.mean[z][...,None]
-        selected_stddev = self.stddev[z][...,None]
-        y = input_energies * selected_stddev + selected_mean
-        return y
+    
+    def __repr__(self):
+        return f'{self.__class__.__name__}(scale={self.scale is not None}, shift={self.shift is not None})'
+    
