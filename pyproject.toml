@@ -38,13 +38,5 @@ dependencies = [
     "torch_cluster",
 ]
 
-[project.optional-dependencies]
-all = [
-    "torch_scatter",
-    "torch_sparse",
-    "torch_cluster",
-    "torch_spline_conv",
-]
-
 [project.urls]
 repository = "https://github.com/THGLab/NewtonNet"

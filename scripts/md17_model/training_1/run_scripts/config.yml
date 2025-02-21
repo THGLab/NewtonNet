@@ -38,9 +38,9 @@ model:
   infer_properties: ['energy', 'gradient_force']    # output properties of the model, energy, gradient_force, direct_force, hessian, stress
 
 training:
-  wandb:    # config of the Weights & Biases logger
-    project: NewtonNet_example    # project name
-    name: null    # run name
+  # wandb:    # config of the Weights & Biases logger
+  #   project: NewtonNet_example    # project name
+  #   name: null    # run name
   loss:    # config of the loss function
     energy:    # config of the energy loss
       weight: 1.0    # weight of the energy loss
