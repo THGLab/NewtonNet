@@ -1,7 +1,7 @@
 # NewtonNet
 A [Newtonian message passing network](https://doi.org/10.1039/D2DD00008C) for deep learning of interatomic potentials and forces
 
-![architecture](newtonnet/models/newtonnet.svg)
+![architecture](newtonnet/models/newtonnet.png)
 
 ## Installation and Dependencies
 We recommend using conda environment to install dependencies of this library.
