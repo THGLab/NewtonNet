@@ -61,7 +61,7 @@ training:
       patience: 15    # patience of the scheduler
       factor: 0.7    # reduction factor of the scheduler
       min_lr: 1.0e-5    # minimum learning rate
-  epochs: 10001    # number of maximum epochs
+  epochs: 1001    # number of maximum epochs
   clip_grad: 1.0    # gradient clipping value; if not provided or 0.0, no gradient clipping
   checkpoint:    # config of the checkpoint
     check_val: 1    # number of epochs to validate the model
