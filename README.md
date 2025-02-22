@@ -1,5 +1,7 @@
 # NewtonNet
-A Newtonian message passing network for deep learning of interatomic potentials and forces
+A [Newtonian message passing network](https://doi.org/10.1039/D2DD00008C) for deep learning of interatomic potentials and forces
+
+![architecture](newtonnet/models/newtonnet.png) 
 
 ## Installation and Dependencies
 We recommend using conda environment to install dependencies of this library.
@@ -12,8 +14,8 @@ Now, you can install NewtonNet in the conda environment by cloning this reposito
 
     git clone https://github.com/THGLab/NewtonNet.git
 
-and then runnig the following command inside the NewtonNet repository (where you have access to pyproject.toml):
-
+    cd NewtonNet
+    
     pip install torch
     pip install -e .
 
