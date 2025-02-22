@@ -122,7 +122,7 @@ class MLAseCalculator(Calculator):
 
     def load_model(self, model):
         # TODO: Load model with only weights
-        model = torch.load(model, map_location=self.device[0])
+        model = torch.load(model, map_location=self.device[0], weights_only=False)
         keys_to_keep = ['energy']
         for key in self.properties:
             key = {
