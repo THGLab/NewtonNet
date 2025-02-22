@@ -6,7 +6,8 @@ from ase.units import fs
 from newtonnet.utils.ase_interface import MLAseCalculator
 
 
-atoms = read('md17_data/aspirin/raw/md17_aspirin.xyz', index=0)
+print('Running aspirin MD simulation with NewtonNet...')
+atoms = read('md17_data/aspirin/ccsd_test/raw/aspirin_ccsd-test.xyz', index=0)
 calc = MLAseCalculator(
     model_path='md17_model/training_1/models/best_model.pt', 
     properties=['energy', 'forces'],
@@ -26,4 +27,5 @@ dyn = Langevin(
     trajectory='md17_md/md.traj', 
     loginterval=100,
     )
-dyn.run(200000)
+dyn.run(20000)
+print('MD simulation finished')
