@@ -61,7 +61,11 @@ coverage.xml
 *.pot
 
 # Django stuff:
+<<<<<<< HEAD
 *.log
+=======
+# *.log
+>>>>>>> Install
 local_settings.py
 db.sqlite3
 db.sqlite3-journal

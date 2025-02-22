@@ -1,5 +1,5 @@
 from torch.optim import Adam, SGD, RMSprop, AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, OneCycleLR, LinearLR, ChainedScheduler
+from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, OneCycleLR, LinearLR, CosineAnnealingLR, ChainedScheduler
 
 
 def get_optimizer_by_string(optimizer_name, parameters, **kwargs):
@@ -64,6 +64,8 @@ def get_scheduler_by_string(scheduler_list, optimizer):
             scheduler.append(OneCycleLR(optimizer, **scheduler_kwargs))
         elif scheduler_name == 'linear':
             scheduler.append(LinearLR(optimizer, **scheduler_kwargs))
+        elif scheduler_name == 'cosine':
+            scheduler.append(CosineAnnealingLR(optimizer, **scheduler_kwargs))
         else:
             raise ValueError(f'scheduler {scheduler_name} is not supported')
     if len(scheduler) == 1:

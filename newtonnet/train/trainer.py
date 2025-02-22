@@ -253,7 +253,7 @@ class Trainer(object):
         print('Training finished')
         
         # load best model
-        self.model = torch.load(os.path.join(self.model_path, 'best_model.pt'))
+        self.model = torch.load(os.path.join(self.model_path, 'best_model.pt'), weights_only=False)
         self.model.eval()
         log_one_epoch = {'epoch': 'final'}
         train_log = self.run_one_epoch(self.train_generator, step=False)

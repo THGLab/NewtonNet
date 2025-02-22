@@ -1,0 +1,70 @@
+general:
+  device: cuda    # device of the model; cpu or cuda
+  output: md17_model    # output directory, the training will be saved in md17_model/training_n, where n is the number of the training
+  precision: double    # precition of the model; double = float64, single = float= float32, or half = float16
+  seed: 0    # random seed
+
+data:
+  train_root: md17_data/aspirin/ccsd_train    # path to the training data, where one or multiple xyz files are stored in the 'raw' subdirectory
+  # val_root: md17_data/aspirin/ccsd_val    # path to the validation data; if not provided, the validation data will be generated from the training data
+  test_root: md17_data/aspirin/ccsd_test    # path to the test data; if not provided, the test data will be generated from the validation data
+  train_size: 950    # number of training samples; if not provided, the training data will be the entire training dataset
+  val_size: null    # number of validation samples; if not provided, the validation data will be the entire validation dataset
+  test_size: null    # number of test samples; if not provided, the test data will be the entire test dataset
+  stats_size: null    # number of samples to calculate the mean and std of the training data; if not provided, the stats size will be the training size
+  train_batch_size: 10    # batch size for training
+  val_batch_size: 1000    # batch size for validation
+  test_batch_size: 1000    # batch size for test
+  cutoff: 5.0    # cutoff radius for the moleculear graph, in Ang
+  force_reload: False    # re-process the data even if the data is already processed
+  in_memory: True    # load the entire dataset in memory
+  data_length_unit: Ang    # length unit of the data; Ang or Bohr
+  data_energy_unit: eV    # energy unit of the data; eV, kcal/mol, kJ/mol, or Ha
+
+model:
+  # pretrained_model:    # config of the pretrained model; if not provided, the model will be trained from scratch
+  #   path: md17_model/training_1/models/best_model.pt    # path to the pretrained model
+  #   freeze_encoder: False    # freeze the embedding and message passing layers of the pretrained model
+  #   freeze_decoder: False    # freeze the output heads of the pretrained model
+  #   freeze_scaler: False    # freeze the output scaling layers of the pretrained model
+  representation:    # config of the embedding layer
+    cutoff_network: poly    # cutoff network; poly or cosine
+    radial_network: bessel    # radial network; bessel
+    n_basis: 20    # number of radial basis functions
+  n_features: 128    # number of features in the message passing and output layers
+  n_interactions: 3    # number of message passing layers
+  activation: swish    # activation function
+  layer_norm: False    # use layer normalization in the message passing layers
+  infer_properties: ['energy', 'gradient_force']    # output properties of the model, energy, gradient_force, direct_force, hessian, stress
+
+training:
+  # wandb:    # config of the Weights & Biases logger
+  #   project: NewtonNet_example    # project name
+  #   name: null    # run name
+  fit_scalers:    # config of the output scaling layers
+    fit_scale: True    # fit or re-fit the scaling layers to training data std
+    fit_shift: True    # fit or re-fit the scaling layers to training data mean
+  loss:    # config of the loss function
+    energy:    # config of the energy loss
+      weight: 1.0    # weight of the energy loss
+      mode: mse    # loss mode; mse, mae, or huber
+    gradient_force:    # config of the gradient force loss
+      weight: 20.0    # weight of the gradient force loss
+      mode: mse    # loss mode; mse, mae, or huber
+  optimizer:    # config of the optimizer
+    adam:    # config of the optimizer; adam, sgd, adamw, or rmsprop
+      lr: 1.0e-3    # learning rate
+      weight_decay: 0.0    # weight decay
+      amsgrad: False    # use the AMSGrad variant
+  lr_scheduler:    # config of the learning rate scheduler
+    plateau:    # config of the learning rate scheduler; plateau, step, or cosin
+      patience: 15    # patience of the scheduler
+      factor: 0.7    # reduction factor of the scheduler
+      min_lr: 1.0e-5    # minimum learning rate
+  epochs: 10001    # number of maximum epochs
+  clip_grad: 1.0    # gradient clipping value; if not provided or 0.0, no gradient clipping
+  checkpoint:    # config of the checkpoint
+    check_val: 1    # number of epochs to validate the model
+    check_test: 10    # number of epochs to test the model
+    check_log: 10    # number of epochs to log and save the training
+
