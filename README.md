@@ -15,7 +15,7 @@ Now, you can install NewtonNet in the conda environment by cloning this reposito
     git clone https://github.com/THGLab/NewtonNet.git
 
     cd NewtonNet
-    
+
     pip install torch
     pip install -e .
 
@@ -27,7 +27,7 @@ Once you finished installations succesfully, you will be able to run NewtonNet m
 ## Training and Inference
 You can find several run files inside the `scripts` directory that rely on the implemented modules in the NewtonNet library. The run scripts need to be accompanied with a yaml configuration file. You can run an example training script with the following command:
 
-    python newtonnet_train.py --config config.yaml
+    python newtonnet_train.py --config config.yml
 
 or resume a checkpoint of an interupted training with the following command:
 
