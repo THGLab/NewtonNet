@@ -17,7 +17,7 @@ and then runnig the following command inside the NewtonNet repository (where you
     pip install torch
     pip install -e .
 
-Once you finished installations succesfully, you will be able to run NewtonNet modules anywhere on your computer as long as the `newtonnet` environment is activated. If you have trouble installing `torch_geometric`, `torch_scatter`, or `torch_cluster`, please refer to https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html. Optionally, if you want to use Weights & Biases for logging (see more on https://docs.wandb.ai), you can initialize it with
+Once you finished installations succesfully, you will be able to run NewtonNet modules anywhere on your computer as long as the `newtonnet` environment is activated. If you have trouble installing `torch_geometric`, `torch_scatter`, or `torch_cluster`, please refer to the [PyG documentation page](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html). Optionally, if you want to use [Weights & Biases](https://docs.wandb.ai) for logging, you can initialize it with
 
     wandb login
 
@@ -35,7 +35,7 @@ Optionally for large datasets, you might want to process the data on a CPU node 
 
     python preprocess.py --root md17_data/aspirin/ccsd_train
 
-All models are assumed in ASE units, such as eV and Ang. You can call an ASE calculator from `newtonnet.utils.ase_interface`. An example MD script can be found in `simulate.py`.
+All models are assumed in [ASE units](https://wiki.fysik.dtu.dk/ase/ase/units.html), such as eV and Ang. You can call an ASE calculator from `newtonnet.utils.ase_interface`. An example MD script can be found in `simulate.py`.
 
 The documentation of the modules are available at most cases. Please look up local classes or functions and consult with the docstrings in the code.
 
