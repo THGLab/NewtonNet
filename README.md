@@ -12,7 +12,7 @@ Now, you can install NewtonNet in the conda environment by cloning this reposito
 
     git clone https://github.com/THGLab/NewtonNet.git
 
-and then runnig the following command inside the NewtonNet repository (where you have access to pyproject.toml):
+and then runnig the following command inside the `NewtonNet` repository (where you have access to `pyproject.toml`):
 
     pip install torch
     pip install -e .
