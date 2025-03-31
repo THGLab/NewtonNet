@@ -207,14 +207,15 @@ class Trainer(object):
 
             # best model
             if epoch % self.check_log == 0 and self.model_path is not None:
+                if self.multi_gpu:
+                    save_model = self.model.module
+                else:
+                    save_model = self.model
                 if log_one_epoch['val_loss'] < self.best_val_loss:
                     self.best_val_loss = log_one_epoch['val_loss']
-                    if self.multi_gpu:
-                        save_model = self.model.module
-                    else:
-                        save_model = self.model
                     torch.save(save_model, os.path.join(self.model_path, 'best_model.pt'))
-                    log_one_epoch['save_model'] = True
+                    log_one_epoch['best_model'] = True
+                torch.save(save_model, os.path.join(self.model_path, 'last_model.pt'))
 
             # plots
             # if epoch % self.check_log == 0 and self.graph_path is not None:
@@ -251,11 +252,33 @@ class Trainer(object):
                         break
 
         print('Training finished')
+
+        # last model
+        if self.model_path is not None:
+            if self.multi_gpu:
+                save_model = self.model.module
+            else:
+                save_model = self.model
+            torch.save(save_model, os.path.join(self.model_path, 'last_model.pt'))
+        self.model.eval()
+        log_one_epoch = {'epoch': 'last'}
+        train_log = self.run_one_epoch(self.train_generator, step=False)
+        log_one_epoch = log_one_epoch | {f'train_{key}': value for key, value in train_log.items()}
+        if self.val_generator is not None:
+            val_log = self.run_one_epoch(self.val_generator, step=False)
+            log_one_epoch = log_one_epoch | {f'val_{key}': value for key, value in val_log.items()}
+        if self.test_generator is not None:
+            test_log = self.run_one_epoch(self.test_generator, step=False)
+            log_one_epoch = log_one_epoch | {f'test_{key}': value for key, value in test_log.items()}
+        if self.output_path is not None:
+            self.local_log(log_one_epoch)
+        if self.log_wandb:
+            wandb.log(log_one_epoch)
         
-        # load best model
+        # best model
         self.model = torch.load(os.path.join(self.model_path, 'best_model.pt'), weights_only=False)
         self.model.eval()
-        log_one_epoch = {'epoch': 'final'}
+        log_one_epoch = {'epoch': 'best'}
         train_log = self.run_one_epoch(self.train_generator, step=False)
         log_one_epoch = log_one_epoch | {f'train_{key}': value for key, value in train_log.items()}
         if self.val_generator is not None:
