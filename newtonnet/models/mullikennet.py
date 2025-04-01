@@ -1,0 +1,383 @@
+import torch
+from torch import nn
+from torch_geometric.utils import scatter
+
+from newtonnet.layers.activations import get_activation_by_string
+from newtonnet.layers.scalers import get_scaler_by_string
+from newtonnet.models.output import get_output_by_string, get_aggregator_by_string
+from newtonnet.models.output import CustomOutputSet, DerivativeProperty, DirectProperty
+
+
+class MullikenNet(nn.Module):
+    """
+    Molecular Newtonian Message Passing
+
+    Parameters:
+        n_features (int): Number of features in the latent layer. Default: 128.
+        n_interactions (int): Number of message passing layers. Default: 3.
+        activation (str): Activation function. Default: 'swish'.
+        layer_norm (bool): Whether to use layer normalization. Default: False.
+        infer_properties (list): The properties to predict. Default: [].
+        representations (dict): The distance transformation functions.
+    """
+
+    def __init__(
+        self,
+        n_features: int = 128,
+        n_interactions: int = 3,
+        activation: str = "swish",
+        layer_norm: bool = False,
+        infer_properties: list = [],
+        representations: nn.Module = None,
+    ) -> None:
+
+        super().__init__()
+        activation = get_activation_by_string(activation)
+
+        # embedding layer
+        self.embedding_layer = EmbeddingNet(
+            n_features=n_features,
+            representations=representations,
+        )
+
+        # message passing
+        self.interaction_layers = nn.ModuleList(
+            [
+                InteractionNet(
+                    n_features=n_features,
+                    n_basis=self.embedding_layer.n_basis,
+                    activation=activation,
+                    layer_norm=layer_norm,
+                )
+                for _ in range(n_interactions)
+            ]
+        )
+
+        # final output layer
+        self.infer_properties = infer_properties
+        self.output_layers = nn.ModuleList()
+        self.scalers = nn.ModuleList()
+        self.aggregators = nn.ModuleList()
+        for key in self.infer_properties:
+            output_layer = get_output_by_string(key, n_features, activation)
+            self.output_layers.append(output_layer)
+            if isinstance(output_layer, DerivativeProperty):
+                self.embedding_layer.requires_dr = True
+            scaler = get_scaler_by_string(key)
+            self.scalers.append(scaler)
+            aggregator = get_aggregator_by_string(key)
+            self.aggregators.append(aggregator)
+
+    # def forward(self, batch):
+    def forward(self, z, disp, edge_index, batch):
+        """
+        Network forward pass
+
+        Parameters:
+            batch: The input data.
+                z (torch.Tensor): The atomic numbers of the atoms in the molecule. Shape: (n_nodes, ).
+                disp (torch.Tensor): The displacement vectors of the atoms in the molecule. Shape: (n_edges, 3).
+                edge_index (torch.Tensor): The edge index of the atoms in the molecule. Shape: (2, n_edges).
+                batch (torch.Tensor): The batch of the atoms in the molecule. Shape: (n_nodes, ).
+
+        Returns:
+            outputs (dict): The outputs of the network.
+        """
+
+        # initialize node and edge representations
+        atom_node, atom_edge, force_node, force_edge, disp_node, dir_edge, dist_edge = (
+            self.embedding_layer(z, disp)
+        )
+
+        # compute interaction block and update atomic embeddings
+        for interaction_layer in self.interaction_layers:
+            atom_node, atom_edge, force_node, force_edge, disp_node = interaction_layer(
+                atom_node,
+                atom_edge,
+                force_node,
+                force_edge,
+                disp_node,
+                dir_edge,
+                dist_edge,
+                edge_index,
+            )
+
+        # output net
+        outputs = CustomOutputSet(
+            z=z,
+            disp=disp,
+            atom_node=atom_node,
+            atom_edge=atom_edge,
+            force_node=force_node,
+            force_edge=force_edge,
+            edge_index=edge_index,
+            batch=batch,
+        )
+        for key, output_layer, scaler, aggregator in zip(
+            self.infer_properties, self.output_layers, self.scalers, self.aggregators
+        ):
+            output = output_layer(outputs)
+            output = scaler(output, outputs)
+            output = aggregator(output, outputs)
+            setattr(outputs, key, output)
+
+        return outputs
+
+    def train(self, mode=True):
+        """
+        Set the network to training mode
+        """
+        super().train(mode)
+        for output_layer in self.output_layers:
+            if isinstance(output_layer, DerivativeProperty):
+                output_layer.create_graph = mode
+
+
+class EmbeddingNet(nn.Module):
+    """
+    Embedding layer of the network
+
+    Parameters:
+        n_features (int): Number of features in the hidden layer.
+        representations (dict): The distance transformation functions.
+    """
+
+    def __init__(self, n_features, representations):
+
+        super().__init__()
+
+        # atomic embedding
+        self.n_features = n_features
+        self.node_embedding = nn.Embedding(118 + 1, n_features, padding_idx=0)
+
+        # edge embedding
+        self.norm = representations["norm"]
+        self.cutoff = representations["cutoff"]
+        self.edge_embedding = representations["radial"]
+        self.n_basis = self.edge_embedding.n_basis
+
+        # requires dr
+        self.requires_dr = False
+
+    def forward(self, z, disp):
+
+        # initialize node representations
+        atom_node = self.node_embedding(z)  # n_nodes, n_features
+        force_node = torch.zeros(
+            z.size(0), 3, self.n_features, dtype=disp.dtype, device=disp.device
+        )  # n_nodes, 3, n_features
+        disp_node = torch.zeros(
+            z.size(0), 3, self.n_features, dtype=disp.dtype, device=disp.device
+        )  # n_nodes, 3, n_features
+
+        # recompute distances and distance vectors
+        if self.requires_dr:
+            disp.requires_grad = True
+
+        # initialize edge representations
+        dist_edge, dir_edge = self.norm(disp)  # n_edges, 1; n_edges, 3
+        dist_edge = self.cutoff(dist_edge) * self.edge_embedding(
+            dist_edge
+        )  # n_edges, n_basis
+
+        atom_edge = (
+            torch.zeros(
+                (dist_edge.size(0), atom_node.size(1)),
+                dtype=dist_edge.dtype,
+                device=dist_edge.device,
+            ),
+        )  # n_edges, n_features
+        force_edge = (
+            torch.zeros(
+                (dist_edge.size(0), 3, force_node.size(2)),
+                dtype=dist_edge.dtype,
+                device=dist_edge.device,
+            ),
+        )  # n_edges, 3, n_features
+
+        return (
+            atom_node,
+            atom_edge,
+            force_node,
+            force_edge,
+            disp_node,
+            dir_edge,
+            dist_edge,
+        )
+        # return atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge
+
+
+class InteractionNet(nn.Module):
+    """
+    Message passing layer of the network
+
+    Parameters:
+        n_features (int): Number of features in the hidden layer.
+        n_basis (int): Number of radial basis functions.
+        activation (nn.Module): Activation function.
+        layer_norm (bool): Whether to use layer normalization.
+    """
+
+    def __init__(self, n_features, n_basis, activation, layer_norm):
+        super().__init__()
+
+        self.n_features = n_features
+
+        # invariant message passing
+        self.message_nodepart = nn.Sequential(
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
+        )
+        self.message_edgepart = nn.Linear(n_basis, n_features, bias=False)
+
+        self.equiv_message1 = nn.Sequential(
+            nn.Linear(n_features, n_features, bias=False),
+            activation,
+            nn.Linear(n_features, n_features, bias=False),
+        )
+        self.equiv_message2 = nn.Sequential(
+            nn.Linear(n_features, n_features, bias=False),
+            activation,
+            nn.Linear(n_features, n_features, bias=False),
+        )
+
+        self.equiv_update = nn.Linear(n_features, n_features, bias=False)
+
+        self.inv_edge_update1 = nn.Linear(n_features, n_features, bias=False)
+        self.inv_edge_update2 = nn.Linear(n_features, n_features, bias=False)
+        self.equiv_edge_update = nn.Linear(n_features, n_features, bias=False)
+
+        # layer norm
+        if layer_norm:
+            self.layer_norm = nn.LayerNorm(n_features)
+        else:
+            self.layer_norm = None
+
+    def forward(
+        self,
+        atom_node,
+        atom_edge,
+        force_node,
+        force_edge,
+        disp_node,
+        dir_edge,
+        dist_edge,
+        edge_index,
+    ):
+        # a
+        message_nodepart = self.message_nodepart(atom_node)  # n_nodes, n_features
+        message_edgepart = self.message_edgepart(dist_edge)  # n_edges, n_features
+        message = (
+            message_edgepart
+            * message_nodepart[edge_index[0]]
+            * message_nodepart[edge_index[1]]
+        )  # n_edges, n_features
+
+        inv_message1 = message  # n_nodes, n_features
+        inv_update1 = scatter(
+            inv_message1, edge_index[0], dim=0, dim_size=atom_node.size(0)
+        )  # n_nodes, n_features
+
+        atom_edge = atom_edge + self.inv_edge_update1(
+            inv_message1
+        )  # n_edges, n_features
+        atom_node = atom_node + inv_update1  # n_nodes, n_features
+
+        # f
+        equiv_message1_invpart = self.equiv_message1(message).unsqueeze(
+            1
+        )  # n_edges, 1, n_features
+        equiv_message1_equivpart = dir_edge.unsqueeze(2)  # n_edges, 3, 1
+        equiv_message1 = (
+            equiv_message1_invpart * equiv_message1_equivpart
+        )  # n_edges, 3, n_features
+
+        equiv_message2_invpart = self.equiv_message2(message).unsqueeze(
+            1
+        )  # n_edges, 1, n_features
+        equiv_message2_equivpart = force_node[edge_index[1]]  # n_edges, 3, n_features
+        equiv_message2 = (
+            equiv_message2_invpart * equiv_message2_equivpart
+        )  # n_edges, 3, n_features
+
+        force_update = scatter(
+            equiv_message1 + equiv_message2,
+            edge_index[0],
+            dim=0,
+            dim_size=force_node.size(0),
+        )  # n_nodes, 3, n_features
+
+        force_edge = force_edge + self.equiv_edge_update(
+            equiv_message1 + equiv_message2
+        )  # n_edges, 3, n_features
+        force_node = force_node + force_update  # n_nodes, 3, n_features
+
+        # update energy
+        inv_update2 = torch.sum(
+            force_node * self.equiv_update(force_node), dim=1
+        )  # n_nodes, n_features
+        atom_edge = atom_edge + self.inv_edge_update2(
+            force_node * self.equiv_update(force_node)
+        )
+        atom_node = atom_node + inv_update2
+
+        # layer norm
+        if self.layer_norm is not None:
+            atom_node = self.layer_norm(atom_node)
+
+        return atom_node, atom_edge, force_node, force_edge, disp_node
+
+
+class ChargeOutput(DirectProperty):
+    """
+    Charge prediction
+
+    Parameters:
+        n_features (int): Number of features in the hidden layer.
+        activation (nn.Module): Activation function.
+    """
+
+    def __init__(self, n_features, activation):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, 1),
+        )
+
+    def forward(self, outputs):
+        charges = self.layers(outputs.atom_node)  # n_nodes, 1
+        return charges
+
+
+class BondOutput(DirectProperty):
+    """
+    Bond order prediction
+
+    Parameters:
+        n_features (int): Number of features in the hidden layer.
+        activation (nn.Module): Activation function.
+    """
+
+    def __init__(self, n_features, activation):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, 1),
+        )
+
+    def forward(self, outputs):
+        bond_edges = self.layers(outputs.atom_edge)  # n_edges, 1
+        bonds = torch.sparse_coo_tensor(
+            outputs.edge_index,
+            bond_edges,
+            dtype=bond_edges.dtype,
+            device=bond_edges.device,
+        )
+        return bonds
