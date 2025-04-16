@@ -159,9 +159,8 @@ class MLAseCalculator(Calculator):
         for atoms in atoms_list:
             z = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long, device=self.device[0])
             pos = torch.tensor(atoms.get_positions(wrap=True), dtype=self.dtype, device=self.device[0])
-            lattice = torch.tensor(atoms.get_cell().array, dtype=self.dtype, device=self.device[0])
-            lattice[~atoms.get_pbc()] = torch.inf
-            data = Data(pos=pos, z=z, lattice=lattice)
+            cell = torch.tensor(atoms.get_cell().array, dtype=self.dtype, device=self.device[0])
+            data = Data(pos=pos, z=z, cell=cell)
             data = self.radius_graph(data)
             data_list.append(data)
         batch = Batch.from_data_list(data_list)
