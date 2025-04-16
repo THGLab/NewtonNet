@@ -134,11 +134,11 @@ def parse_npz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
 
     z = torch.from_numpy(raw_data['Z']).int()
     pos = torch.from_numpy(raw_data['R']).to(precision)
-    lattice = torch.from_numpy(raw_data['L']).to(precision) if 'L' in raw_data else torch.ones(3, dtype=precision) * torch.inf
-    if lattice.numel() == 3:
-        lattice = lattice.diag()
-    elif lattice.numel() == 9:
-        lattice = lattice.reshape(3, 3)
+    cell = torch.from_numpy(raw_data['L']).to(precision) if 'L' in raw_data else torch.zeros(3, dtype=precision)
+    if cell.numel() == 3:
+        cell = cell.diag()
+    elif cell.numel() == 9:
+        cell = cell.reshape(3, 3)
     else:
         raise ValueError('The lattice must be a single 3x3 matrix for each npz file.')
     energy = torch.from_numpy(raw_data['E']).to(precision) if 'E' in raw_data else None
@@ -148,7 +148,7 @@ def parse_npz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
         data = Data()
         data.z = z.reshape(-1) if z.dim() < 2 else z[i].reshape(-1)
         data.pos = pos[i].reshape(-1, 3) * units['length']
-        data.lattice = lattice.reshape(1, 3, 3) * units['length']
+        data.cell = cell.reshape(1, 3, 3) * units['length']
         if energy is not None:
             data.energy = energy[i].reshape(1) * units['energy']
         if force is not None:
@@ -170,16 +170,14 @@ def parse_xyz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
         atoms.set_constraint()
         z = torch.from_numpy(atoms.get_atomic_numbers()).int()
         pos = torch.from_numpy(atoms.get_positions(wrap=True)).to(precision)
-        lattice = torch.from_numpy(atoms.get_cell().array).to(precision)
-        lattice[lattice.norm(dim=-1) < 1e-3] = torch.inf
-        lattice[~atoms.get_pbc()] = torch.inf
+        cell = torch.from_numpy(atoms.get_cell().array).to(precision)
         energy = torch.tensor(atoms.get_potential_energy(), dtype=precision)
         forces = torch.from_numpy(atoms.get_forces()).to(precision)
 
         data = Data()
         data.z = z.reshape(-1)
         data.pos = pos.reshape(-1, 3) * units['length']
-        data.lattice = lattice.reshape(1, 3, 3) * units['length']
+        data.cell = cell.reshape(1, 3, 3) * units['length']
         data.energy = energy.reshape(1) * units['energy']
         data.force = forces.reshape(-1, 3) * units['energy'] / units['length']
 

@@ -33,50 +33,36 @@ class RadiusGraph(BaseTransform):
 
     def forward(self, data: Data) -> Data:
         assert data.pos is not None
+        
+        # Create full graph
+        n_node = data.pos.shape[0]
+        row = torch.arange(n_node, device=data.pos.device).view(n_node, 1).repeat(1, n_node).view(-1)
+        col = torch.arange(n_node, device=data.pos.device).view(n_node, 1).repeat(n_node, 1).view(-1)
+        edge_index = torch.stack([row, col], dim=0)
+        if data.batch is not None:
+            edge_index = edge_index[:, data.batch[row] == data.batch[col]]
+        if not self.loop:
+            edge_index = edge_index[:, edge_index[0] != edge_index[1]]
 
-        if data.lattice is not None and data.lattice.max(dim=-1).values.isfinite().any():
-            n_cell = (self.r / data.lattice.norm(dim=-1)).ceil().int().flatten()
-            assert len(n_cell) == 3
-            n_cell_tot = (2 * n_cell + 1).prod()
-            shift = torch.tensor([[i, j, k] for i in range(-n_cell[0], n_cell[0] + 1) for j in range(-n_cell[1], n_cell[1] + 1) for k in range(-n_cell[2], n_cell[2] + 1)], dtype=data.pos.dtype, device=data.pos.device)
-            shift = shift @ data.lattice
-            shift = shift.nan_to_num()
-            shifted_pos = data.pos[:, None, :] + shift  # shape: (n_node, n_cell_tot, 3)
-            shifted_pos = shifted_pos.reshape(-1, 3)  # shape: (n_node * n_cell_tot, 3)
-            shifted_node_index = torch.arange(data.pos.shape[0], dtype=torch.long, device=data.pos.device)[:, None].repeat(1, n_cell_tot)  # shape: (n_node, n_cell_tot)
-            shifted_node_index = shifted_node_index.reshape(-1)  # shape: (n_node * n_cell_tot)
-            shifted_node_isoriginal = torch.zeros(data.pos.shape[0], n_cell_tot, dtype=torch.bool, device=data.pos.device)  # shape: (n_node, n_cell_tot)
-            shifted_node_isoriginal[:, n_cell_tot // 2] = True
-            shifted_node_isoriginal = shifted_node_isoriginal.reshape(-1)  # shape: (n_node * n_cell_tot)
+        # Compute distances
+        disp = data.pos[edge_index[0]] - data.pos[edge_index[1]]
+        if data.cell is not None and not (data.cell == 0).all():
             if data.batch is not None:
-                shifted_batch = data.batch[:, None].repeat(1, n_cell_tot)  # shape: (n_node, n_cell_tot)
-                shifted_batch = shifted_batch.reshape(-1)  # shape: (n_node * n_cell_tot)
+                cell = data.cell[data.batch]
             else:
-                shifted_batch = None
-            shifted_edge_index = radius_graph(
-                shifted_pos,
-                self.r,
-                shifted_batch,
-                self.loop,
-                max_num_neighbors=self.max_num_neighbors,
-                flow=self.flow,
-                num_workers=self.num_workers,
-            )#.sort(dim=0)[0].unique(dim=1)
-            shifted_edge_isoriginal = shifted_node_isoriginal[shifted_edge_index[0]]
-            shifted_edge_index = shifted_edge_index[:, shifted_edge_isoriginal]
-            data.edge_index = shifted_node_index[shifted_edge_index]
-            data.disp = shifted_pos[shifted_edge_index[0]] - shifted_pos[shifted_edge_index[1]]
-        else:
-            data.edge_index = radius_graph(
-                data.pos,
-                self.r,
-                data.batch,
-                self.loop,
-                max_num_neighbors=self.max_num_neighbors,
-                flow=self.flow,
-                num_workers=self.num_workers,
-            )#.sort(dim=0)[0].unique(dim=1)
-            data.disp = data.pos[data.edge_index[0]] - data.pos[data.edge_index[1]]
+                cell = data.cell.repeat(n_node, 1, 1)
+            cell = cell[edge_index[0]]
+            scaled_disp = torch.linalg.solve(cell.transpose(1, 2), disp)
+            disp = disp - torch.bmm(cell, torch.round(scaled_disp).unsqueeze(-1)).squeeze(-1)
+
+        # Filter edges based on distance
+        mask = (disp.norm(dim=1) < self.r)
+        edge_index = edge_index[:, mask]
+        disp = disp[mask]
+
+        # Record to data
+        data.edge_index = edge_index
+        data.disp = disp
 
         return data
 
