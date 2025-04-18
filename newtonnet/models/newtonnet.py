@@ -4,12 +4,12 @@ from torch_geometric.utils import scatter
 
 from newtonnet.layers.activations import get_activation_by_string
 from newtonnet.layers.scalers import get_scaler_by_string
-from newtonnet.models.output import get_output_by_string, get_aggregator_by_string
+from newtonnet.models.util import get_output_by_string, get_aggregator_by_string
 from newtonnet.models.output import CustomOutputSet, DerivativeProperty
 
 
 class NewtonNet(nn.Module):
-    '''
+    """
     Molecular Newtonian Message Passing
 
     Parameters:
@@ -19,15 +19,16 @@ class NewtonNet(nn.Module):
         layer_norm (bool): Whether to use layer normalization. Default: False.
         infer_properties (list): The properties to predict. Default: [].
         representations (dict): The distance transformation functions.
-    '''
+    """
+
     def __init__(
-            self,
-            n_features: int = 128,
-            n_interactions: int = 3,
-            activation: str = 'swish',
-            layer_norm: bool = False,
-            infer_properties: list = [],
-            representations: nn.Module = None,
+        self,
+        n_features: int = 128,
+        n_interactions: int = 3,
+        activation: str = "swish",
+        layer_norm: bool = False,
+        infer_properties: list = [],
+        representations: nn.Module = None,
     ) -> None:
 
         super().__init__()
@@ -37,17 +38,20 @@ class NewtonNet(nn.Module):
         self.embedding_layer = EmbeddingNet(
             n_features=n_features,
             representations=representations,
-            )
+        )
 
         # message passing
-        self.interaction_layers = nn.ModuleList([
-            InteractionNet(
-                n_features=n_features,
-                n_basis=self.embedding_layer.n_basis,
-                activation=activation,
-                layer_norm=layer_norm,
-                ) for _ in range(n_interactions)
-            ])
+        self.interaction_layers = nn.ModuleList(
+            [
+                InteractionNet(
+                    n_features=n_features,
+                    n_basis=self.embedding_layer.n_basis,
+                    activation=activation,
+                    layer_norm=layer_norm,
+                )
+                for _ in range(n_interactions)
+            ]
+        )
 
         # final output layer
         self.infer_properties = infer_properties
@@ -55,7 +59,9 @@ class NewtonNet(nn.Module):
         self.scalers = nn.ModuleList()
         self.aggregators = nn.ModuleList()
         for key in self.infer_properties:
-            output_layer = get_output_by_string(key, n_features, activation)
+            output_layer = get_output_by_string(
+                key, n_features, activation, representations
+            )
             self.output_layers.append(output_layer)
             if isinstance(output_layer, DerivativeProperty):
                 self.embedding_layer.requires_dr = True
@@ -64,10 +70,9 @@ class NewtonNet(nn.Module):
             aggregator = get_aggregator_by_string(key)
             self.aggregators.append(aggregator)
 
-
     # def forward(self, batch):
     def forward(self, z, disp, edge_index, batch):
-        '''
+        """
         Network forward pass
 
         Parameters:
@@ -79,29 +84,42 @@ class NewtonNet(nn.Module):
 
         Returns:
             outputs (dict): The outputs of the network.
-        '''
+        """
 
         # initialize node and edge representations
-        atom_node, force_node, disp_node, dir_edge, dist_edge = self.embedding_layer(z, disp)
+        atom_node, force_node, disp_node, dir_edge, dist_edge = self.embedding_layer(
+            z, disp
+        )
 
         # compute interaction block and update atomic embeddings
         for interaction_layer in self.interaction_layers:
-            atom_node, force_node, disp_node = interaction_layer(atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index)
+            atom_node, force_node, disp_node = interaction_layer(
+                atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index
+            )
 
         # output net
-        outputs = CustomOutputSet(z=z, disp=disp, atom_node=atom_node, force_node=force_node, edge_index=edge_index, batch=batch)
-        for key, output_layer, scaler, aggregator in zip(self.infer_properties, self.output_layers, self.scalers, self.aggregators):
+        outputs = CustomOutputSet(
+            z=z,
+            disp=disp,
+            atom_node=atom_node,
+            force_node=force_node,
+            edge_index=edge_index,
+            batch=batch,
+        )
+        for key, output_layer, scaler, aggregator in zip(
+            self.infer_properties, self.output_layers, self.scalers, self.aggregators
+        ):
             output = output_layer(outputs)
             output = scaler(output, outputs)
             output = aggregator(output, outputs)
             setattr(outputs, key, output)
 
         return outputs
-    
+
     def train(self, mode=True):
-        '''
+        """
         Set the network to training mode
-        '''
+        """
         super().train(mode)
         for output_layer in self.output_layers:
             if isinstance(output_layer, DerivativeProperty):
@@ -109,13 +127,14 @@ class NewtonNet(nn.Module):
 
 
 class EmbeddingNet(nn.Module):
-    '''
+    """
     Embedding layer of the network
 
     Parameters:
         n_features (int): Number of features in the hidden layer.
         representations (dict): The distance transformation functions.
-    '''
+    """
+
     def __init__(self, n_features, representations):
 
         super().__init__()
@@ -125,9 +144,9 @@ class EmbeddingNet(nn.Module):
         self.node_embedding = nn.Embedding(118 + 1, n_features, padding_idx=0)
 
         # edge embedding
-        self.norm = representations['norm']
-        self.cutoff = representations['cutoff']
-        self.edge_embedding = representations['radial']
+        self.norm = representations["norm"]
+        self.cutoff = representations["cutoff"]
+        self.edge_embedding = representations["radial"]
         self.n_basis = self.edge_embedding.n_basis
 
         # requires dr
@@ -137,8 +156,12 @@ class EmbeddingNet(nn.Module):
 
         # initialize node representations
         atom_node = self.node_embedding(z)  # n_nodes, n_features
-        force_node = torch.zeros(z.size(0), 3, self.n_features, dtype=disp.dtype, device=disp.device)  # n_nodes, 3, n_features
-        disp_node = torch.zeros(z.size(0), 3, self.n_features, dtype=disp.dtype, device=disp.device)  # n_nodes, 3, n_features
+        force_node = torch.zeros(
+            z.size(0), 3, self.n_features, dtype=disp.dtype, device=disp.device
+        )  # n_nodes, 3, n_features
+        disp_node = torch.zeros(
+            z.size(0), 3, self.n_features, dtype=disp.dtype, device=disp.device
+        )  # n_nodes, 3, n_features
 
         # recompute distances and distance vectors
         if self.requires_dr:
@@ -146,14 +169,16 @@ class EmbeddingNet(nn.Module):
 
         # initialize edge representations
         dist_edge, dir_edge = self.norm(disp)  # n_edges, 1; n_edges, 3
-        dist_edge = self.cutoff(dist_edge) * self.edge_embedding(dist_edge)  # n_edges, n_basis
+        dist_edge = self.cutoff(dist_edge) * self.edge_embedding(
+            dist_edge
+        )  # n_edges, n_basis
 
         return atom_node, force_node, disp_node, dir_edge, dist_edge
         # return atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge
 
 
 class InteractionNet(nn.Module):
-    '''
+    """
     Message passing layer of the network
 
     Parameters:
@@ -161,7 +186,8 @@ class InteractionNet(nn.Module):
         n_basis (int): Number of radial basis functions.
         activation (nn.Module): Activation function.
         layer_norm (bool): Whether to use layer normalization.
-    '''
+    """
+
     def __init__(self, n_features, n_basis, activation, layer_norm):
         super().__init__()
 
@@ -174,7 +200,7 @@ class InteractionNet(nn.Module):
             nn.Linear(n_features, n_features),
         )
         self.message_edgepart = nn.Linear(n_basis, n_features, bias=False)
-        
+
         self.equiv_message1 = nn.Sequential(
             nn.Linear(n_features, n_features, bias=False),
             activation,
@@ -185,7 +211,7 @@ class InteractionNet(nn.Module):
             activation,
             nn.Linear(n_features, n_features, bias=False),
         )
-        
+
         self.equiv_update = nn.Linear(n_features, n_features, bias=False)
 
         # layer norm
@@ -193,31 +219,54 @@ class InteractionNet(nn.Module):
             self.layer_norm = nn.LayerNorm(n_features)
         else:
             self.layer_norm = None
-    
-    def forward(self, atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index):
-        # a
-        message_nodepart = self.message_nodepart(atom_node)    # n_nodes, n_features
-        message_edgepart = self.message_edgepart(dist_edge)    # n_edges, n_features
-        message = message_edgepart * message_nodepart[edge_index[0]] * message_nodepart[edge_index[1]]    # n_edges, n_features
 
-        inv_message1 = message    # n_nodes, n_features
-        inv_update1 = scatter(inv_message1, edge_index[0], dim=0, dim_size=atom_node.size(0))    # n_nodes, n_features
-        atom_node = atom_node + inv_update1    # n_nodes, n_features
+    def forward(
+        self, atom_node, force_node, disp_node, dir_edge, dist_edge, edge_index
+    ):
+        # a
+        message_nodepart = self.message_nodepart(atom_node)  # n_nodes, n_features
+        message_edgepart = self.message_edgepart(dist_edge)  # n_edges, n_features
+        message = (
+            message_edgepart
+            * message_nodepart[edge_index[0]]
+            * message_nodepart[edge_index[1]]
+        )  # n_edges, n_features
+
+        inv_message1 = message  # n_nodes, n_features
+        inv_update1 = scatter(
+            inv_message1, edge_index[0], dim=0, dim_size=atom_node.size(0)
+        )  # n_nodes, n_features
+        atom_node = atom_node + inv_update1  # n_nodes, n_features
 
         # f
-        equiv_message1_invpart = self.equiv_message1(message).unsqueeze(1)    # n_edges, 1, n_features
-        equiv_message1_equivpart = dir_edge.unsqueeze(2)    # n_edges, 3, 1
-        equiv_message1 = equiv_message1_invpart * equiv_message1_equivpart    # n_edges, 3, n_features
+        equiv_message1_invpart = self.equiv_message1(message).unsqueeze(
+            1
+        )  # n_edges, 1, n_features
+        equiv_message1_equivpart = dir_edge.unsqueeze(2)  # n_edges, 3, 1
+        equiv_message1 = (
+            equiv_message1_invpart * equiv_message1_equivpart
+        )  # n_edges, 3, n_features
 
-        equiv_message2_invpart = self.equiv_message2(message).unsqueeze(1)    # n_edges, 1, n_features
-        equiv_message2_equivpart = force_node[edge_index[1]]    # n_edges, 3, n_features
-        equiv_message2 = equiv_message2_invpart * equiv_message2_equivpart    # n_edges, 3, n_features
+        equiv_message2_invpart = self.equiv_message2(message).unsqueeze(
+            1
+        )  # n_edges, 1, n_features
+        equiv_message2_equivpart = force_node[edge_index[1]]  # n_edges, 3, n_features
+        equiv_message2 = (
+            equiv_message2_invpart * equiv_message2_equivpart
+        )  # n_edges, 3, n_features
 
-        force_update = scatter(equiv_message1 + equiv_message2, edge_index[0], dim=0, dim_size=force_node.size(0))    # n_nodes, 3, n_features
-        force_node = force_node + force_update    # n_nodes, 3, n_features
+        force_update = scatter(
+            equiv_message1 + equiv_message2,
+            edge_index[0],
+            dim=0,
+            dim_size=force_node.size(0),
+        )  # n_nodes, 3, n_features
+        force_node = force_node + force_update  # n_nodes, 3, n_features
 
         # update energy
-        inv_update2 = torch.sum(force_node * self.equiv_update(force_node), dim=1)    # n_nodes, n_features
+        inv_update2 = torch.sum(
+            force_node * self.equiv_update(force_node), dim=1
+        )  # n_nodes, n_features
         atom_node = atom_node + inv_update2
 
         # layer norm

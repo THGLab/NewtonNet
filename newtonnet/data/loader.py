@@ -176,12 +176,17 @@ def parse_xyz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
         energy = torch.tensor(atoms.get_potential_energy(), dtype=precision)
         forces = torch.from_numpy(atoms.get_forces()).to(precision)
 
+        # TODO: make this optional
+        bonds = torch.from_numpy(atoms.get_array("bonds")).to(precision)
+
         data = Data()
         data.z = z.reshape(-1)
         data.pos = pos.reshape(-1, 3) * units['length']
         data.lattice = lattice.reshape(1, 3, 3) * units['length']
         data.energy = energy.reshape(1) * units['energy']
         data.force = forces.reshape(-1, 3) * units['energy'] / units['length']
+        # TODO: make this optional
+        data.bonds = bonds 
 
         if pre_filter is not None and not pre_filter(data):
             continue
