@@ -4,13 +4,15 @@ from torch_geometric.utils import scatter
 from newtonnet.models.output import DirectProperty
 
 
-class BondOutput(DirectProperty):
+class EdgeOutput(DirectProperty):
     def __init__(
         self,
         n_features: int = 128,
-        activation: str = "swish",
+        activation=nn.SiLU(),
         representations: nn.Module = None,
     ):
+        super().__init__()
+
         self.layers = nn.Sequential(
             nn.Linear(n_features, n_features),
             activation,
@@ -28,13 +30,8 @@ class BondOutput(DirectProperty):
     def forward(self, outputs):
         _, dist_edge = self.embedding_layer(outputs.disp)
         atom_edge = self.message_layer(outputs.atom_node, dist_edge, outputs.edge_index)
-        bond_order = self.layers(atom_edge)
-        return torch.sparse_coo_tensor(
-            outputs.edge_index,
-            bond_order,
-            dtype=bond_order.dtype,
-            device=bond_order.device,
-        )
+        edge_property = self.layers(atom_edge)
+        return edge_property
 
 
 class EdgeInteractionNet(nn.Module):
