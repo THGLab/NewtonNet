@@ -10,7 +10,7 @@ from newtonnet.layers.scalers import get_scaler_by_string
 from newtonnet.models.output import get_output_by_string, get_aggregator_by_string
 from newtonnet.models.output import DerivativeProperty, SecondDerivativeProperty
 from newtonnet.data import RadiusGraph
-
+from newtonnet.utils.pretrained_models import download_checkpoint
 
 ##-------------------------------------
 ##     ML model ASE interface
@@ -122,6 +122,8 @@ class MLAseCalculator(Calculator):
 
     def load_model(self, model):
         # TODO: Load model with only weights
+        if model in ['ani1', 'ani1x', 't1x']:
+            model = download_checkpoint(model)
         model = torch.load(model, map_location=self.device[0], weights_only=False)
         keys_to_keep = ['energy']
         for key in self.properties:
@@ -198,4 +200,3 @@ class MLAseCalculator(Calculator):
     #         idx[min_mask] = np.argmin(data[:, min_mask], axis=0)
     #         idx[max_mask] = np.argmax(data[:, max_mask], axis=0)
     #     return idx
-    
