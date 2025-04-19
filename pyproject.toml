@@ -36,6 +36,7 @@ dependencies = [
     "torch_geometric",
     "torch_scatter",
     "torch_cluster",
+    "torch-pme @ git+https://github.com/lab-cosmo/torch-pme.git",
 ]
 
 [project.urls]
