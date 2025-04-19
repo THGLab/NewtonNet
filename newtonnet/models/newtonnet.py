@@ -26,7 +26,7 @@ class NewtonNet(nn.Module):
             n_interactions: int = 3,
             activation: str = 'swish',
             layer_norm: bool = False,
-            infer_properties: list = [],
+            output_properties: list = [],
             representations: nn.Module = None,
     ) -> None:
 
@@ -50,18 +50,18 @@ class NewtonNet(nn.Module):
             ])
 
         # final output layer
-        self.infer_properties = infer_properties
+        self.output_properties = output_properties
         self.output_layers = nn.ModuleList()
         self.scalers = nn.ModuleList()
         self.aggregators = nn.ModuleList()
-        for key in self.infer_properties:
-            output_layer = get_output_by_string(key, n_features, activation)
+        for output_kwargs in self.output_properties:
+            output_layer = get_output_by_string(**output_kwargs, n_features=n_features, activation=activation)
             self.output_layers.append(output_layer)
             if isinstance(output_layer, DerivativeProperty):
                 self.embedding_layer.requires_dr = True
-            scaler = get_scaler_by_string(key)
+            scaler = get_scaler_by_string(output_kwargs['key'])
             self.scalers.append(scaler)
-            aggregator = get_aggregator_by_string(key)
+            aggregator = get_aggregator_by_string(output_kwargs['key'])
             self.aggregators.append(aggregator)
 
 

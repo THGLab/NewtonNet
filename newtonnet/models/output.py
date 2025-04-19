@@ -2,22 +2,23 @@ import torch
 from torch import nn
 from torch.autograd import grad
 from torch_geometric.utils import scatter
+from torchpme import CoulombPotential, EwaldCalculator
 
 from newtonnet.layers.scalers import ScaleShift
 
 
 
-def get_output_by_string(key, n_features=None, activation=None):
+def get_output_by_string(key, **kwargs):
     if key == 'energy':
-        output_layer = EnergyOutput(n_features, activation)
+        output_layer = EnergyOutput(**kwargs)
     elif key == 'gradient_force':
-        output_layer = GradientForceOutput()
+        output_layer = GradientForceOutput(**kwargs)
     elif key == 'direct_force':
-        output_layer = DirectForceOutput(n_features, activation)
+        output_layer = DirectForceOutput(**kwargs)
     elif key == 'hessian':
-        output_layer = HessianOutput()
+        output_layer = HessianOutput(**kwargs)
     elif key == 'virial':
-        output_layer = VirialOutput()
+        output_layer = VirialOutput(**kwargs)
     else:
         raise NotImplementedError(f'Output type {key} is not implemented yet')
     return output_layer
@@ -77,6 +78,49 @@ class EnergyOutput(DirectProperty):
         n_features (int): Number of features in the hidden layer.
         activation (nn.Module): Activation function.
     '''
+    def __init__(self, n_features, activation, with_latent_ewald=False):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, 1),
+            )
+        self.with_latent_ewald = with_latent_ewald
+        if self.with_latent_ewald:
+            self.charge_layer = nn.Sequential(
+                nn.Linear(n_features, n_features),
+                activation,
+                nn.Linear(n_features, n_features),
+                activation,
+                nn.Linear(n_features, 1),
+                )
+            self.ewald = EwaldCalculator(
+                potential=CoulombPotential(smearing=1.0),
+                lr_wavelength=0.5,
+            )
+
+
+    def forward(self, outputs):
+        energy = self.layers(outputs.atom_node)
+        if self.with_latent_ewald:
+            charge = self.charge_layer(outputs.atom_node)
+            # charge = scatter(charge, outputs.batch, dim=0, reduce='sum').reshape(-1)
+            # outputs.charge = charge
+            energy += self.ewald(outputs.disp, charge, outputs.batch)
+        # energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
+        # outputs.energy = energy
+        return energy
+    
+class ChargeOutput(DirectProperty):
+    '''
+    Charge prediction
+
+    Parameters:
+        n_features (int): Number of features in the hidden layer.
+        activation (nn.Module): Activation function.
+    '''
     def __init__(self, n_features, activation):
         super().__init__()
         self.layers = nn.Sequential(
@@ -88,10 +132,34 @@ class EnergyOutput(DirectProperty):
             )
 
     def forward(self, outputs):
-        energy = self.layers(outputs.atom_node)
-        # energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
-        # outputs.energy = energy
-        return energy
+        charge = self.layers(outputs.atom_node)
+        # charge = scatter(charge, outputs.batch, dim=0, reduce='sum').reshape(-1)
+        # outputs.charge = charge
+        return charge
+    
+class DipoleOutput(DirectProperty):
+    '''
+    Dipole prediction
+
+    Parameters:
+        n_features (int): Number of features in the hidden layer.
+        activation (nn.Module): Activation function.
+    '''
+    def __init__(self, n_features, activation):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, 3),
+            )
+
+    def forward(self, outputs):
+        dipole = self.layers(outputs.atom_node) * outputs.
+        # dipole = scatter(dipole, outputs.batch, dim=0, reduce='sum').reshape(-1)
+        # outputs.dipole = dipole
+        return dipole
 
 class GradientForceOutput(DerivativeProperty):
     '''
