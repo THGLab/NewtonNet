@@ -81,7 +81,7 @@ represenations = get_representation_by_string(
     )
 pretrained_model = settings['model'].pop('pretrained_model', None)
 if pretrained_model is not None:
-    model = torch.load(pretrained_model['path'], map_location=device[0], with_weights=False)
+    model = torch.load(pretrained_model['path'], map_location=device[0], weights_only=False)
     model.to(precision)
     if pretrained_model.get('freeze_encoder', False):
         for param in model.embedding_layer.parameters():
