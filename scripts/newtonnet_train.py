@@ -86,6 +86,7 @@ if pretrained_model is not None:
     if pretrained_model.get('freeze_encoder', False):
         for param in model.embedding_layer.parameters():
             param.requires_grad = False
+    if pretrained_model.get('freeze_interaction', False):
         for param in model.interaction_layers.parameters():
             param.requires_grad = False
     if pretrained_model.get('freeze_decoder', False):
