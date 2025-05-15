@@ -36,6 +36,7 @@ dependencies = [
     "torch_geometric",
     "torch_scatter",
     "torch_cluster",
+    "les@git+https://github.com/ChengUCB/les",
 ]
 
 [project.urls]
