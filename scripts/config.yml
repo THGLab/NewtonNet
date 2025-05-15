@@ -36,7 +36,7 @@ model:
   n_interactions: 3    # number of message passing layers
   activation: swish    # activation function
   layer_norm: False    # use layer normalization in the message passing layers
-  infer_properties: ['energy', 'gradient_force']    # output properties of the model, energy, gradient_force, direct_force, hessian, stress
+  output_properties: ['energy', 'gradient_force']    # output properties of the model, energy, gradient_force, direct_force, hessian, stress
 
 training:
   # wandb:    # config of the Weights & Biases logger

@@ -17,7 +17,7 @@ class NewtonNet(nn.Module):
         n_interactions (int): Number of message passing layers. Default: 3.
         activation (str): Activation function. Default: 'swish'.
         layer_norm (bool): Whether to use layer normalization. Default: False.
-        infer_properties (list): The properties to predict. Default: [].
+        output_properties (list): The properties to predict. Default: [].
         representations (dict): The distance transformation functions.
     '''
     def __init__(
@@ -26,7 +26,7 @@ class NewtonNet(nn.Module):
             n_interactions: int = 3,
             activation: str = 'swish',
             layer_norm: bool = False,
-            infer_properties: list = [],
+            output_properties: list = [],
             representations: nn.Module = None,
     ) -> None:
 
@@ -50,11 +50,11 @@ class NewtonNet(nn.Module):
             ])
 
         # final output layer
-        self.infer_properties = infer_properties
+        self.output_properties = output_properties
         self.output_layers = nn.ModuleList()
         self.scalers = nn.ModuleList()
         self.aggregators = nn.ModuleList()
-        for key in self.infer_properties:
+        for key in self.output_properties:
             output_layer = get_output_by_string(key, n_features, activation)
             self.output_layers.append(output_layer)
             if isinstance(output_layer, DerivativeProperty):
@@ -90,7 +90,7 @@ class NewtonNet(nn.Module):
 
         # output net
         outputs = CustomOutputSet(z=z, disp=disp, atom_node=atom_node, force_node=force_node, edge_index=edge_index, batch=batch)
-        for key, output_layer, scaler, aggregator in zip(self.infer_properties, self.output_layers, self.scalers, self.aggregators):
+        for key, output_layer, scaler, aggregator in zip(self.output_properties, self.output_layers, self.scalers, self.aggregators):
             output = output_layer(outputs)
             output = scaler(output, outputs)
             output = aggregator(output, outputs)
