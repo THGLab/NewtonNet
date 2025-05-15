@@ -24,7 +24,8 @@ data:
 model:
   # pretrained_model:    # config of the pretrained model; if not provided, the model will be trained from scratch
   #   path: md17_model/training_1/models/best_model.pt    # path to the pretrained model
-  #   freeze_encoder: False    # freeze the embedding and message passing layers of the pretrained model
+  #   freeze_encoder: False    # freeze the embedding layer of the pretrained model
+  #   freeze_interaction: False    # freeze the message passing layers of the pretrained model
   #   freeze_decoder: False    # freeze the output heads of the pretrained model
   #   freeze_scaler: False    # freeze the output scaling layers of the pretrained model
   representation:    # config of the embedding layer
@@ -49,7 +50,7 @@ training:
       weight: 1.0    # weight of the energy loss
       mode: mse    # loss mode; mse, mae, or huber
     gradient_force:    # config of the gradient force loss
-      weight: 20.0    # weight of the gradient force loss
+      weight: 50.0    # weight of the gradient force loss
       mode: mse    # loss mode; mse, mae, or huber
   optimizer:    # config of the optimizer
     adam:    # config of the optimizer; adam, sgd, adamw, or rmsprop
@@ -61,7 +62,7 @@ training:
       patience: 15    # patience of the scheduler
       factor: 0.7    # reduction factor of the scheduler
       min_lr: 1.0e-5    # minimum learning rate
-  epochs: 1001    # number of maximum epochs
+  epochs: 1000    # number of maximum epochs
   clip_grad: 1.0    # gradient clipping value; if not provided or 0.0, no gradient clipping
   checkpoint:    # config of the checkpoint
     check_val: 1    # number of epochs to validate the model
