@@ -15,7 +15,6 @@ data:
   train_batch_size: 10    # batch size for training
   val_batch_size: 1000    # batch size for validation
   test_batch_size: 1000    # batch size for test
-  cutoff: 5.0    # cutoff radius for the moleculear graph, in Ang
   force_reload: False    # re-process the data even if the data is already processed
   in_memory: True    # load the entire dataset in memory
   data_length_unit: Ang    # length unit of the data; Ang or Bohr
@@ -28,6 +27,7 @@ model:
   #   freeze_interaction: False    # freeze the message passing layers of the pretrained model
   #   freeze_decoder: False    # freeze the output heads of the pretrained model
   #   freeze_scaler: False    # freeze the output scaling layers of the pretrained model
+  cutoff: 5.0    # cutoff radius for the moleculear graph, in Ang
   n_basis: 20    # number of radial basis functions
   n_features: 128    # number of features in the message passing and output layers
   n_interactions: 3    # number of message passing layers
@@ -52,8 +52,6 @@ training:
   optimizer:    # config of the optimizer
     adam:    # config of the optimizer; adam, sgd, adamw, or rmsprop
       lr: 1.0e-3    # learning rate
-      weight_decay: 0.0    # weight decay
-      amsgrad: False    # use the AMSGrad variant
   lr_scheduler:    # config of the learning rate scheduler
     plateau:    # config of the learning rate scheduler; plateau, step, or cosin
       patience: 15    # patience of the scheduler

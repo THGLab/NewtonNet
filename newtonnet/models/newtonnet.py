@@ -87,7 +87,7 @@ class NewtonNet(nn.Module):
         '''
 
         # initialize node and edge representations
-        atom_node, force_node, dir_edge, dist_edge, edge_index = self.embedding_layer(z, pos, cell, batch)
+        atom_node, force_node, dir_edge, dist_edge, edge_index = self.embedding_layers(z, pos, cell, batch)
 
         # compute interaction block and update atomic embeddings
         for interaction_layer in self.interaction_layers:
@@ -147,7 +147,7 @@ class EmbeddingNet(nn.Module):
             pos.requires_grad = True
 
         # initialize edge representations
-        edge_index, dist_edge, dir_edge = self.edge_embedding(pos, cell, batch)  # n_edges, n_basis; n_edges, 3; 2, n_edges
+        dist_edge, dir_edge, edge_index = self.edge_embedding(pos, cell, batch)  # n_edges, n_basis; n_edges, 3; 2, n_edges
 
         return atom_node, force_node, dir_edge, dist_edge, edge_index
         # return atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge

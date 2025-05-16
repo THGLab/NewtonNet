@@ -56,10 +56,7 @@ if wandb_kwargs is not None:
 
 # device
 precision = get_precision_by_string(settings['general']['precision'])
-if type(settings['general']['device']) is list:
-    device = [torch.device(item) for item in settings['general']['device']]
-else:
-    device = [torch.device(settings['general']['device'])]
+device = torch.device(settings['general']['device'])
 
 # data
 torch.manual_seed(settings['general']['seed'])
@@ -84,7 +81,7 @@ if pretrained_model is not None:
             param.requires_grad = False
 else:
     model = NewtonNet(**settings['model'])
-    model.to(device[0])
+    model.to(device)
     model.to(precision)
 
 # fit scalers

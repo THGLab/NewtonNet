@@ -48,7 +48,7 @@ class Trainer(object):
             script_path: str = None,
             settings_path: str = None,
             checkpoint: dict = {},
-            device: torch.device = torch.device('cpu'),
+            device: torch.device = None,
             train_generator: DataLoader = None,
             val_generator: DataLoader = None,
             test_generator: DataLoader = None,
@@ -64,9 +64,12 @@ class Trainer(object):
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
         self.best_val_loss = torch.inf
-        self.device = device
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = device
         self.multi_gpu = True if type(device) is list and len(device) > 1 else False
-        self.model.to(self.device[0])
+        self.model.to(self.device)
         if self.multi_gpu:
             self.model = DataParallel(self.model, device_ids=self.device)
         self.train_generator = train_generator
@@ -300,7 +303,7 @@ class Trainer(object):
                 self.optimizer.zero_grad()
             # preds = self.model(batch)
             batch = batch.to(self.device)
-            preds = self.model(batch.z, batch.disp, batch.edge_index, batch.batch)
+            preds = self.model(batch.z, batch.pos, batch.cell, batch.batch)
             main_loss = self.main_loss(preds, batch)
             eval_loss = self.eval_loss(preds, batch)
             if step:

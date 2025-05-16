@@ -48,11 +48,11 @@ class RadiusGraph(nn.Module):
     Create a radius graph based on the interatomic distances.
 
     Parameters:
-        cutoff (float): cutoff radius.
+        r (float): cutoff radius.
     '''
-    def __init__(self, cutoff):
+    def __init__(self, r):
         super().__init__()
-        self.r = cutoff
+        self.r = r
 
     def forward(self, pos, cell=None, batch=None):
         """Compute radius graph.
