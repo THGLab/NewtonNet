@@ -11,7 +11,6 @@ from newtonnet.train import Trainer
 from newtonnet.data import RadiusGraph
 from newtonnet.data import parse_train_test
 from newtonnet.layers.precision import get_precision_by_string
-from newtonnet.layers.representations import get_representation_by_string
 from newtonnet.layers.scalers import set_scaler_by_string
 from newtonnet.train.loss import get_loss_by_string
 from newtonnet.train.optimizer import get_optimizer_by_string, get_scheduler_by_string
@@ -64,27 +63,15 @@ else:
 
 # data
 torch.manual_seed(settings['general']['seed'])
-transform = Compose([
-    ToDevice(device[0]),
-    RadiusGraph(settings['data'].pop('cutoff')),
-    ])
-train_gen, val_gen, test_gen, stats = parse_train_test(
-    precision=precision,
-    transform=transform,
-    **settings['data'],
-    )
+train_gen, val_gen, test_gen, stats = parse_train_test(precision=precision, **settings['data'])
 
 # model
-represenations = get_representation_by_string(
-    cutoff=transform.transforms[1].r, 
-    **settings['model'].pop('representation', {}),
-    )
 pretrained_model = settings['model'].pop('pretrained_model', None)
 if pretrained_model is not None:
     model = torch.load(pretrained_model['path'], map_location=device[0], weights_only=False)
     model.to(precision)
     if pretrained_model.get('freeze_encoder', False):
-        for param in model.embedding_layer.parameters():
+        for param in model.embedding_layers.parameters():
             param.requires_grad = False
     if pretrained_model.get('freeze_interaction', False):
         for param in model.interaction_layers.parameters():
@@ -96,15 +83,12 @@ if pretrained_model is not None:
         for param in model.scalers.parameters():
             param.requires_grad = False
 else:
-    model = NewtonNet(
-        representations=represenations,
-        **settings['model'],
-        )
+    model = NewtonNet(**settings['model'])
     model.to(device[0])
     model.to(precision)
 
 # fit scalers
-for key, scaler in zip(model.infer_properties, model.scalers):
+for key, scaler in zip(model.output_properties, model.scalers):
     set_scaler_by_string(key, scaler, stats, **settings['training'].pop('fit_scalers', {}))
 
 # loss

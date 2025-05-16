@@ -28,10 +28,7 @@ model:
   #   freeze_interaction: False    # freeze the message passing layers of the pretrained model
   #   freeze_decoder: False    # freeze the output heads of the pretrained model
   #   freeze_scaler: False    # freeze the output scaling layers of the pretrained model
-  representation:    # config of the embedding layer
-    cutoff_network: poly    # cutoff network; poly or cosine
-    radial_network: bessel    # radial network; bessel
-    n_basis: 20    # number of radial basis functions
+  n_basis: 20    # number of radial basis functions
   n_features: 128    # number of features in the message passing and output layers
   n_interactions: 3    # number of message passing layers
   activation: swish    # activation function

@@ -299,6 +299,7 @@ class Trainer(object):
             if step:
                 self.optimizer.zero_grad()
             # preds = self.model(batch)
+            batch = batch.to(self.device)
             preds = self.model(batch.z, batch.disp, batch.edge_index, batch.batch)
             main_loss = self.main_loss(preds, batch)
             eval_loss = self.eval_loss(preds, batch)

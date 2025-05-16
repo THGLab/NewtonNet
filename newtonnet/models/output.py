@@ -3,9 +3,6 @@ from torch import nn
 from torch.autograd import grad
 from torch_geometric.utils import scatter
 
-from newtonnet.layers.scalers import ScaleShift
-
-
 
 def get_output_by_string(key, n_features=None, activation=None):
     if key == 'energy':
@@ -52,17 +49,6 @@ class DerivativeProperty(nn.Module):
     def __init__(self):
         super().__init__()
         self.create_graph = False  # Set by the model with train() or eval()
-
-    def get_pairwise_force(self, outputs):
-        if not hasattr(outputs, 'pairwise_force'):
-            outputs.pairwise_force = -grad(
-                outputs.energy, 
-                outputs.disp, 
-                grad_outputs=torch.ones_like(outputs.energy),
-                create_graph=self.create_graph, 
-                retain_graph=self.create_graph,
-                )[0]
-        return outputs.pairwise_force
     
 class SecondDerivativeProperty(DerivativeProperty):
     def __init__(self):
@@ -89,8 +75,6 @@ class EnergyOutput(DirectProperty):
 
     def forward(self, outputs):
         energy = self.layers(outputs.atom_node)
-        # energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
-        # outputs.energy = energy
         return energy
 
 class GradientForceOutput(DerivativeProperty):
@@ -101,10 +85,13 @@ class GradientForceOutput(DerivativeProperty):
         super().__init__()
 
     def forward(self, outputs):
-        pairwise_force = self.get_pairwise_force(outputs)
-        force = scatter(pairwise_force, outputs.edge_index[0], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0)) - \
-            scatter(pairwise_force, outputs.edge_index[1], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0))
-        # outputs.gradient_force = force
+        force = -grad(
+            outputs.energy, 
+            outputs.pos, 
+            grad_outputs=torch.ones_like(outputs.energy),
+            create_graph=self.create_graph, 
+            retain_graph=self.create_graph,
+            )[0]
         return force
     
 class DirectForceOutput(DirectProperty):
@@ -124,7 +111,6 @@ class DirectForceOutput(DirectProperty):
     def forward(self, outputs):
         force = self.layers(outputs.atom_node).unsqueeze(1) * outputs.force_node  # n_nodes, 3, n_features
         force = force.sum(dim=-1)  # n_nodes, 3
-        # outputs.direct_force = force
         return force
     
 class HessianOutput(SecondDerivativeProperty):
@@ -138,16 +124,13 @@ class HessianOutput(SecondDerivativeProperty):
         hessian = torch.vmap(
             lambda vec: grad(
                 -outputs.gradient_force.flatten(), 
-                outputs.disp, 
+                outputs.pos, 
                 grad_outputs=vec, 
                 create_graph=self.create_graph,
                 retain_graph=True,
                 )[0],
             )(torch.eye(outputs.gradient_force.numel(), device=outputs.gradient_force.device))
-        hessian = hessian.reshape(*outputs.gradient_force.shape, *outputs.disp.shape)
-        hessian = scatter(hessian, outputs.edge_index[0], dim=2, reduce='sum', dim_size=outputs.atom_node.size(0)) - \
-            scatter(hessian, outputs.edge_index[1], dim=2, reduce='sum', dim_size=outputs.atom_node.size(0))
-        # outputs.hessian = hessian
+        hessian = hessian.reshape(*outputs.gradient_force.shape, *outputs.pos.shape)
         return hessian
     
 class VirialOutput(DerivativeProperty):
@@ -156,6 +139,7 @@ class VirialOutput(DerivativeProperty):
     '''
     def __init__(self):
         super().__init__()
+        raise NotImplementedError('Virial output is not implemented yet')
 
     def forward(self, outputs):
         pairwise_force = self.get_pairwise_force(outputs)
