@@ -131,9 +131,7 @@ class MLAseCalculator(Calculator):
             cell = torch.tensor(atoms.get_cell().array, dtype=self.dtype, device=self.device)
             data = Data(pos=pos, z=z, cell=cell.reshape(1, 3, 3))
             data_list.append(data)
-            print(data)
         batch = Batch.from_data_list(data_list)
-        print(batch)
         return batch
 
     # def remove_outlier(self, data, idx):
