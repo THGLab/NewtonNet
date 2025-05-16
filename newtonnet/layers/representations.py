@@ -234,4 +234,4 @@ class RadialBesselLayer(nn.Module):
         return out
     
     def __repr__(self):
-        return f'{self.__class__.__name__}(n_basis={self.n_basis})'
+        return f'{self.__class__.__name__}(basis={self.n_basis})'
