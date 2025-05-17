@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch.autograd import grad
 from torch_geometric.utils import scatter
+from les import Les
 
 
 def get_output_by_string(key, n_features=None, activation=None):
@@ -17,13 +18,15 @@ def get_output_by_string(key, n_features=None, activation=None):
         output_layer = VirialOutput()
     elif key == 'stress':
         output_layer = StressOutput()
+    elif key == 'charge':
+        output_layer = ChargeOutput(n_features, activation)
     else:
         raise NotImplementedError(f'Output type {key} is not implemented yet')
     return output_layer
 
 def get_aggregator_by_string(key):
     if key == 'energy':
-        aggregator = SumAggregator()
+        aggregator = EnergyAggregator()
     elif key == 'gradient_force':
         aggregator = NullAggregator()
     elif key == 'direct_force':
@@ -33,6 +36,8 @@ def get_aggregator_by_string(key):
     elif key == 'virial':
         aggregator = NullAggregator()
     elif key == 'stress':
+        aggregator = NullAggregator()
+    elif key == 'charge':
         aggregator = NullAggregator()
     else:
         raise NotImplementedError(f'Aggregate type {key} is not implemented yet')
@@ -167,13 +172,49 @@ class StressOutput(DerivativeProperty):
         volume = outputs.cell.det().view(-1, 1, 1)
         return virial / volume
     
+class ChargeOutput(DirectProperty):
+    '''
+    Charge prediction
 
-class SumAggregator(nn.Module):
+    Parameters:
+        n_features (int): Number of features in the hidden layer.
+        activation (nn.Module): Activation function.
+    '''
+    def __init__(self, n_features, activation):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, n_features),
+            activation,
+            nn.Linear(n_features, 1),
+            )
+
+    def forward(self, outputs):
+        charge = self.layers(outputs.atom_node)
+        return charge
+    
+
+class EnergyAggregator(nn.Module):
     def __init__(self):
         super().__init__()
+        self.les = Les({
+            'use_atomwise': False,
+        })
 
-    def forward(self, output, outputs):
-        return scatter(output, outputs.batch, dim=0, reduce='sum').reshape(-1)
+    def forward(self, energy, outputs):
+        if hasattr(outputs, 'charge'):
+            energy_sr = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
+            energy_lr = self.les(
+                positions=outputs.pos,
+                cell=outputs.cell,
+                latent_charges=outputs.charge,
+                batch=outputs.batch,
+            )['E_lr']
+            return energy_sr + energy_lr
+        else:
+            energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
+            return energy
 
 class NullAggregator(nn.Module):
     def __init__(self):

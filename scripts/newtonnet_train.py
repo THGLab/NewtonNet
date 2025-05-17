@@ -85,8 +85,9 @@ else:
     model.to(precision)
 
 # fit scalers
+fit_scalers = settings['training'].pop('fit_scalers', {})
 for key, scaler in zip(model.output_properties, model.scalers):
-    set_scaler_by_string(key, scaler, stats, **settings['training'].pop('fit_scalers', {}))
+    set_scaler_by_string(key, scaler, stats, **fit_scalers.pop(key, {}))
 
 # loss
 main_loss, eval_loss = get_loss_by_string(settings['training'].pop('loss', None))

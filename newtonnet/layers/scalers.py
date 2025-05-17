@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torch_geometric.utils import scatter
 
 
 def get_scaler_by_string(key):
@@ -16,6 +15,8 @@ def get_scaler_by_string(key):
         scaler = ScaleShift(scale=False, shift=False)
     elif key == 'stress':
         scaler = ScaleShift(scale=False, shift=False)
+    elif key == 'charge':
+        scaler = ScaleShift(scale=True, shift=True)
     else:
         raise NotImplementedError(f'Scaler type {key} is not implemented yet')
     return scaler
@@ -31,8 +32,17 @@ def set_scaler_by_string(key, scaler, stats, fit_scale=True, fit_shift=True):
     elif key == 'direct_force':
         if fit_scale:
             scaler.set_scale(stats['force']['scale'])
-    # elif scaler.key == 'hessian':
-    #     pass
+    elif key == 'hessian':
+        pass
+    elif key == 'virial':
+        pass
+    elif key == 'stress':
+        pass
+    elif key == 'charge':
+        if fit_scale:
+            scaler.set_scale(stats['charge']['scale'])
+        if fit_shift:
+            scaler.set_shift(stats['charge']['shift'])
     else:
         raise NotImplementedError(f'Scaler type {key} is not implemented yet')
     return scaler
