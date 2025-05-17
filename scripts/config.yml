@@ -40,12 +40,8 @@ training:
   #   project: NewtonNet_example    # project name
   #   name: null    # run name
   fit_scalers:    # config of the output scaling layers
-    charge:    # config of the charge scaling layer
-      fit_scale: False    # fit or re-fit the scaling layer to training data std
-      fit_shift: False    # fit or re-fit the scaling layer to training data mean
-    energy:    # config of the energy scaling layer
-      fit_scale: True    # fit or re-fit the scaling layer to training data std
-      fit_shift: True    # fit or re-fit the scaling layer to training data mean
+    fit_scale: True    # fit or re-fit the scaling layer to training data std
+    fit_shift: True    # fit or re-fit the scaling layer to training data mean
   loss:    # config of the loss function
     energy:    # config of the energy loss
       weight: 1.0    # weight of the energy loss

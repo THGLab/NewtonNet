@@ -22,29 +22,10 @@ def get_scaler_by_string(key):
     return scaler
 
 def set_scaler_by_string(key, scaler, stats, fit_scale=True, fit_shift=True):
-    if key == 'energy':
-        if fit_scale:
-            scaler.set_scale(stats['energy']['scale'])
-        if fit_shift:
-            scaler.set_shift(stats['energy']['shift'])
-    elif key == 'gradient_force':
-        pass
-    elif key == 'direct_force':
-        if fit_scale:
-            scaler.set_scale(stats['force']['scale'])
-    elif key == 'hessian':
-        pass
-    elif key == 'virial':
-        pass
-    elif key == 'stress':
-        pass
-    elif key == 'charge':
-        if fit_scale:
-            scaler.set_scale(stats['charge']['scale'])
-        if fit_shift:
-            scaler.set_shift(stats['charge']['shift'])
-    else:
-        raise NotImplementedError(f'Scaler type {key} is not implemented yet')
+    if scaler.scale is not None and key in stats and fit_scale:
+        scaler.set_scale(stats[key]['scale'])
+    if scaler.shift is not None and key in stats and fit_shift:
+        scaler.set_shift(stats[key]['shift'])
     return scaler
 
 class ScaleShift(nn.Module):
