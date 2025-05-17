@@ -93,6 +93,7 @@ class EnergyOutput(DirectProperty):
 
     def forward(self, outputs):
         energy = self.layers(outputs.atom_node)
+        print('energy', energy.dtype)
         return energy
 
 class GradientForceOutput(DerivativeProperty):
@@ -105,7 +106,9 @@ class GradientForceOutput(DerivativeProperty):
     def forward(self, outputs):
         if not hasattr(outputs.pos, '_saved_grad'):
             super()._save_grad(outputs)
-        return -outputs.pos._saved_grad
+        force = -outputs.pos._saved_grad
+        print('force', force.dtype)
+        return force
     
 class DirectForceOutput(DirectProperty):
     '''
@@ -156,7 +159,9 @@ class VirialOutput(DerivativeProperty):
     def forward(self, outputs):
         if not hasattr(outputs.displacement, '_saved_grad'):
             super()._save_grad(outputs)
-        return -outputs.displacement._saved_grad
+        virial = -outputs.displacement._saved_grad
+        print('virial', virial.dtype)
+        return virial
     
 class StressOutput(DerivativeProperty):
     '''
@@ -170,7 +175,9 @@ class StressOutput(DerivativeProperty):
             super()._save_grad(outputs)
         virial = outputs.displacement._saved_grad
         volume = outputs.cell.det().view(-1, 1, 1)
-        return virial / volume
+        stress = virial / volume
+        print('stress', stress.dtype)
+        return stress
     
 class ChargeOutput(DirectProperty):
     '''

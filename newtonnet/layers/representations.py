@@ -70,7 +70,6 @@ class RadiusGraph(nn.Module):
         # Create full graph
         n_node = pos.shape[0]
         if batch is not None:
-            print('With batch')
             edge_index = []
             for b in batch.unique():
                 nodes = (batch == b).nonzero().flatten()
@@ -78,7 +77,6 @@ class RadiusGraph(nn.Module):
                 edge_index.append(torch.stack([row.flatten(), col.flatten()], dim=0))
             edge_index = torch.cat(edge_index, dim=1)
         else:
-            print('Without batch')
             row, col = torch.meshgrid(torch.arange(n_node, dtype=pos.dtype), torch.arange(n_node, dtype=pos.dtype), indexing='ij')
             edge_index = torch.stack([row.flatten(), col.flatten()], dim=0)
         edge_index = edge_index[:, edge_index[0] != edge_index[1]]
