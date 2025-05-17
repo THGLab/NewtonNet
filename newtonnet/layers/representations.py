@@ -69,11 +69,16 @@ class RadiusGraph(nn.Module):
         """
         # Create full graph
         n_node = pos.shape[0]
-        row = torch.arange(n_node, device=pos.device).view(n_node, 1).repeat(1, n_node).view(-1)
-        col = torch.arange(n_node, device=pos.device).view(n_node, 1).repeat(n_node, 1).view(-1)
-        edge_index = torch.stack([row, col], dim=0)
         if batch is not None:
-            edge_index = edge_index[:, batch[row] == batch[col]]
+            edge_index = []
+            for b in batch.unique():
+                nodes = (batch == b).nonzero().flatten()
+                row, col = torch.meshgrid(nodes, nodes, indexing='ij')
+                edge_index.append(torch.stack([row.flatten(), col.flatten()], dim=0))
+            edge_index = torch.cat(edge_index, dim=1)
+        else:
+            row, col = torch.meshgrid(torch.arange(n_node), torch.arange(n_node), indexing='ij')
+            edge_index = torch.stack([row.flatten(), col.flatten()], dim=0)
         edge_index = edge_index[:, edge_index[0] != edge_index[1]]
             
         # Compute distances
