@@ -32,10 +32,10 @@ class EdgeEmbedding(nn.Module):
 
         """
         # Compute radius graph
-        edge_index, disp = self.radius_graph(pos, cell=cell, batch=batch)
+        edge_index, dist = self.radius_graph(pos, cell=cell, batch=batch)
 
         # Compute distance and direction
-        dist_edge, dir_edge = self.norm(disp)
+        dist_edge, dir_edge = self.norm(dist)
 
         # Compute radial embedding
         dist_edge = self.envelope(dist_edge) * self.embedding(dist_edge)
@@ -77,26 +77,22 @@ class RadiusGraph(nn.Module):
         edge_index = edge_index[:, edge_index[0] != edge_index[1]]
             
         # Compute distances
-        disp = pos[edge_index[0]] - pos[edge_index[1]]
+        dist = pos[edge_index[0]] - pos[edge_index[1]]
         if cell is not None and not (cell == 0).all():
             if batch is not None:
                 cell = cell[batch]
             else:
                 cell = cell.repeat(n_node, 1, 1)
             cell = cell[edge_index[0]]
-            scaled_disp = torch.linalg.solve(cell.transpose(1, 2), disp)
-            disp = disp - torch.bmm(cell, torch.round(scaled_disp).unsqueeze(-1)).squeeze(-1)
+            scaled_dist = torch.linalg.solve(cell.transpose(1, 2), dist)
+            dist = dist - torch.bmm(cell, torch.round(scaled_dist).unsqueeze(-1)).squeeze(-1)
 
         # Filter edges based on distance
-        mask = (disp.norm(dim=1) < self.r)
+        mask = (dist.norm(dim=1) < self.r)
         edge_index = edge_index[:, mask]
-        disp = disp[mask]
+        dist = dist[mask]
 
-        # Record to data
-        edge_index = edge_index
-        disp = disp
-
-        return edge_index, disp
+        return edge_index, dist
 
     def __repr__(self):
         return f'{self.__class__.__name__}(r={self.r})'

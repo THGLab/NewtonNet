@@ -24,11 +24,8 @@ class MLAseCalculator(Calculator):
             self, 
             model_path: str,
             properties: list = None, 
-            disagreement: str = None,
             device: str = None,
             precision: str = 'float32',
-            script: bool = False,
-            trace_n_atoms: int = 0,
             **kwargs,
             ):
         """
@@ -36,13 +33,9 @@ class MLAseCalculator(Calculator):
 
         Parameters:
             model_path (str): The path to the model.
-            settings_path (str): The path to the settings.
             properties (list): The properties to be predicted. Default: ['energy', 'free_energy', 'forces'].
-            disagreement (str): The type of disagreement to be calculated. Default: None.
             device (str): The device for the calculator. Default: 'cpu'.
             precision (str): The precision of the calculator. Default: 'float32'.
-            script (bool): Whether to script the model. Default: False.
-            trace_n_atoms (int): The number of atoms to be traced. Default: 0.
         """
         Calculator.__init__(self, **kwargs)
 
@@ -54,10 +47,6 @@ class MLAseCalculator(Calculator):
 
         self.properties = properties if properties is not None else self.implemented_properties
         self.model = self.load_model(model_path)
-        
-        self.script = script
-        self.trace_n_atoms = trace_n_atoms
-        self.disagreement = disagreement
         
 
     def calculate(self, atoms=None, properties=None, system_changes=None):
@@ -81,10 +70,8 @@ class MLAseCalculator(Calculator):
             hessian = pred.hessian.cpu().detach().numpy()
             self.results['hessian'] = hessian.reshape(n_frames, n_atoms, 3, n_atoms, 3).squeeze()
         if 'stress' in self.properties:
-            virial = pred.virial.cpu().detach().numpy()
-            volume = np.array([atoms[frame].get_volume() for frame in range(n_frames)])
-            stress = -virial[:, [0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]] / volume[:, None] / 2
-            self.results['stress'] = stress.squeeze()
+            stress = pred.stress.cpu().detach().numpy()
+            self.results['stress'] = stress[:, [0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]].squeeze()
         del pred
 
     def load_model(self, model):
@@ -98,7 +85,7 @@ class MLAseCalculator(Calculator):
                 'energy': 'energy',
                 'free_energy': 'energy',
                 'forces': 'gradient_force',
-                'stress': 'virial',
+                'stress': 'stress',
                 'hessian': 'hessian',
             }.get(key)
             keys_to_keep.append(key)
@@ -129,6 +116,8 @@ class MLAseCalculator(Calculator):
             z = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long, device=self.device)
             pos = torch.tensor(atoms.get_positions(wrap=True), dtype=self.dtype, device=self.device)
             cell = torch.tensor(atoms.get_cell().array, dtype=self.dtype, device=self.device)
+            pbc = torch.tensor(atoms.get_pbc(), dtype=torch.bool, device=self.device)
+            cell[~pbc] = 0.0
             data = Data(pos=pos, z=z, cell=cell.reshape(1, 3, 3))
             data_list.append(data)
         batch = Batch.from_data_list(data_list)

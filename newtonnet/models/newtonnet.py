@@ -87,14 +87,14 @@ class NewtonNet(nn.Module):
         '''
 
         # initialize node and edge representations
-        atom_node, force_node, dir_edge, dist_edge, edge_index = self.embedding_layers(z, pos, cell, batch)
+        atom_node, force_node, dir_edge, dist_edge, edge_index, displacement = self.embedding_layers(z, pos, cell, batch)
 
         # compute interaction block and update atomic embeddings
         for interaction_layer in self.interaction_layers:
             atom_node, force_node = interaction_layer(atom_node, force_node, dir_edge, dist_edge, edge_index)
 
         # output net
-        outputs = CustomOutputSet(z=z, pos=pos, atom_node=atom_node, force_node=force_node, edge_index=edge_index, cell=cell, batch=batch)
+        outputs = CustomOutputSet(z=z, pos=pos, atom_node=atom_node, force_node=force_node, edge_index=edge_index, cell=cell, displacement=displacement, batch=batch)
         for key, output_layer, scaler, aggregator in zip(self.output_properties, self.output_layers, self.scalers, self.aggregators):
             output = output_layer(outputs)
             output = scaler(output, outputs)
@@ -142,14 +142,23 @@ class EmbeddingNet(nn.Module):
         atom_node = self.node_embedding(z)  # n_nodes, n_features
         force_node = torch.zeros(z.size(0), 3, self.n_features, dtype=pos.dtype, device=pos.device)  # n_nodes, 3, n_features
 
-        # recompute distances and distance vectors
+        # prepare for gradient calculation
+        displacement = torch.zeros_like(cell)
+        displacement[:, 0, 0] = 1.0
+        displacement[:, 1, 1] = 1.0
+        displacement[:, 2, 2] = 1.0
         if self.requires_dr:
             pos.requires_grad = True
+            displacement.requires_grad = True
+        symmetric_displacement = (displacement + displacement.transpose(-1, -2)) / 2
+        pos_displaced = torch.bmm(pos.unsqueeze(1), symmetric_displacement[batch]).squeeze(1)  # n_nodes, 3
+        cell_displaced = torch.bmm(cell, symmetric_displacement).squeeze(1)  # n_nodes, 3, 3
+
 
         # initialize edge representations
-        dist_edge, dir_edge, edge_index = self.edge_embedding(pos, cell, batch)  # n_edges, n_basis; n_edges, 3; 2, n_edges
+        dist_edge, dir_edge, edge_index = self.edge_embedding(pos_displaced, cell_displaced, batch)  # n_edges, n_basis; n_edges, 3; 2, n_edges
 
-        return atom_node, force_node, dir_edge, dist_edge, edge_index
+        return atom_node, force_node, dir_edge, dist_edge, edge_index, displacement
         # return atom_node, force_node, disp_node, dir_edge, cutoff_edge, rbf_edge
 
 

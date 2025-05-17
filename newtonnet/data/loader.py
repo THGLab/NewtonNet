@@ -129,6 +129,8 @@ class MolecularInMemoryDataset(InMemoryDataset):
         self.save(data_list, data_path)
 
 def parse_npz(raw_path: str, pre_transform: Callable, pre_filter: Callable, precision: torch.dtype, units: dict) -> List[Data]:
+    raise NotImplementedError('npz format is not supported.')
+
     data_list = []
     raw_data = np.load(raw_path)
 
@@ -171,6 +173,8 @@ def parse_xyz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
         z = torch.from_numpy(atoms.get_atomic_numbers()).int()
         pos = torch.from_numpy(atoms.get_positions(wrap=True)).to(precision)
         cell = torch.from_numpy(atoms.get_cell().array).to(precision)
+        pbc = torch.from_numpy(atoms.get_pbc()).bool()
+        cell[~pbc] = 0.0
         energy = torch.tensor(atoms.get_potential_energy(), dtype=precision)
         forces = torch.from_numpy(atoms.get_forces()).to(precision)
 

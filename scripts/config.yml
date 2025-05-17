@@ -1,5 +1,5 @@
 general:
-  device: cuda    # device of the model; cpu or cuda
+  device: cpu    # device of the model; cpu or cuda
   output: md17_model    # output directory, the training will be saved in md17_model/training_n, where n is the number of the training
   precision: double    # precition of the model; double = float64, single = float= float32, or half = float16
   seed: 0    # random seed

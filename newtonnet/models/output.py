@@ -15,6 +15,8 @@ def get_output_by_string(key, n_features=None, activation=None):
         output_layer = HessianOutput()
     elif key == 'virial':
         output_layer = VirialOutput()
+    elif key == 'stress':
+        output_layer = StressOutput()
     else:
         raise NotImplementedError(f'Output type {key} is not implemented yet')
     return output_layer
@@ -29,6 +31,8 @@ def get_aggregator_by_string(key):
     elif key == 'hessian':
         aggregator = NullAggregator()
     elif key == 'virial':
+        aggregator = NullAggregator()
+    elif key == 'stress':
         aggregator = NullAggregator()
     else:
         raise NotImplementedError(f'Aggregate type {key} is not implemented yet')
@@ -49,6 +53,15 @@ class DerivativeProperty(nn.Module):
     def __init__(self):
         super().__init__()
         self.create_graph = False  # Set by the model with train() or eval()
+
+    def _save_grad(self, outputs):
+        outputs.pos._saved_grad, outputs.displacement._saved_grad = grad(
+            outputs.energy,
+            (outputs.pos, outputs.displacement),
+            grad_outputs=torch.ones_like(outputs.energy),
+            create_graph=self.create_graph,
+            retain_graph=self.create_graph,
+            )
     
 class SecondDerivativeProperty(DerivativeProperty):
     def __init__(self):
@@ -85,14 +98,9 @@ class GradientForceOutput(DerivativeProperty):
         super().__init__()
 
     def forward(self, outputs):
-        force = -grad(
-            outputs.energy, 
-            outputs.pos, 
-            grad_outputs=torch.ones_like(outputs.energy),
-            create_graph=self.create_graph, 
-            retain_graph=self.create_graph,
-            )[0]
-        return force
+        if not hasattr(outputs.pos, '_saved_grad'):
+            super()._save_grad(outputs)
+        return -outputs.pos._saved_grad
     
 class DirectForceOutput(DirectProperty):
     '''
@@ -127,7 +135,7 @@ class HessianOutput(SecondDerivativeProperty):
                 outputs.pos, 
                 grad_outputs=vec, 
                 create_graph=self.create_graph,
-                retain_graph=True,
+                retain_graph=self.create_graph,
                 )[0],
             )(torch.eye(outputs.gradient_force.numel(), device=outputs.gradient_force.device))
         hessian = hessian.reshape(*outputs.gradient_force.shape, *outputs.pos.shape)
@@ -139,15 +147,25 @@ class VirialOutput(DerivativeProperty):
     '''
     def __init__(self):
         super().__init__()
-        raise NotImplementedError('Virial output is not implemented yet')
 
     def forward(self, outputs):
-        pairwise_force = self.get_pairwise_force(outputs)
-        virial = outputs.disp[:, :, None] * pairwise_force[:, None, :]
-        virial = scatter(virial, outputs.edge_index[0], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0)) + \
-            scatter(virial, outputs.edge_index[1], dim=0, reduce='sum', dim_size=outputs.atom_node.size(0))
-        virial = scatter(virial, outputs.batch, dim=0, reduce='sum')
-        return virial
+        if not hasattr(outputs.displacement, '_saved_grad'):
+            super()._save_grad(outputs)
+        return -outputs.displacement._saved_grad
+    
+class StressOutput(DerivativeProperty):
+    '''
+    Stress prediction
+    '''
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, outputs):
+        if not hasattr(outputs.displacement, '_saved_grad'):
+            super()._save_grad(outputs)
+        virial = outputs.displacement._saved_grad
+        volume = outputs.cell.det().view(-1, 1, 1)
+        return virial / volume
     
 
 class SumAggregator(nn.Module):
