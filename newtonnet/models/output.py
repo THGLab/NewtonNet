@@ -60,7 +60,7 @@ class DerivativeProperty(nn.Module):
         self.create_graph = False  # Set by the model with train() or eval()
 
     def _save_grad(self, outputs):
-        outputs.pos._saved_grad, outputs.displacement._saved_grad = grad(
+        outputs.pos_grad, outputs.displacement_grad = grad(
             outputs.energy,
             (outputs.pos, outputs.displacement),
             grad_outputs=torch.ones_like(outputs.energy),
@@ -103,9 +103,9 @@ class GradientForceOutput(DerivativeProperty):
         super().__init__()
 
     def forward(self, outputs):
-        if not hasattr(outputs.pos, '_saved_grad'):
+        if not hasattr(outputs, 'pos_grad'):
             super()._save_grad(outputs)
-        force = -outputs.pos._saved_grad
+        force = -outputs.pos_grad
         return force
     
 class DirectForceOutput(DirectProperty):
@@ -155,9 +155,9 @@ class VirialOutput(DerivativeProperty):
         super().__init__()
 
     def forward(self, outputs):
-        if not hasattr(outputs.displacement, '_saved_grad'):
+        if not hasattr(outputs, 'displacement_grad'):
             super()._save_grad(outputs)
-        virial = -outputs.displacement._saved_grad
+        virial = -outputs.displacement_grad
         return virial
     
 class StressOutput(DerivativeProperty):
@@ -168,9 +168,9 @@ class StressOutput(DerivativeProperty):
         super().__init__()
 
     def forward(self, outputs):
-        if not hasattr(outputs.displacement, '_saved_grad'):
+        if not hasattr(outputs, 'displacement_grad'):
             super()._save_grad(outputs)
-        virial = outputs.displacement._saved_grad
+        virial = outputs.displacement_grad
         volume = outputs.cell.det().view(-1, 1, 1)
         stress = virial / volume
         return stress
