@@ -205,12 +205,13 @@ class EnergyAggregator(nn.Module):
     def forward(self, energy, outputs):
         if hasattr(outputs, 'charge'):
             energy_sr = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
-            energy_lr = self.les(
-                positions=outputs.pos,
-                cell=outputs.cell,
-                latent_charges=outputs.charge,
-                batch=outputs.batch,
-            )['E_lr']
+            # energy_lr = self.les(
+            #     positions=outputs.pos,
+            #     cell=outputs.cell,
+            #     latent_charges=outputs.charge,
+            #     batch=outputs.batch,
+            # )['E_lr']
+            energy_lr = 0
             return energy_sr + energy_lr
         else:
             energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
