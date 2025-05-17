@@ -87,6 +87,7 @@ class MLAseCalculator(Calculator):
                 'forces': 'gradient_force',
                 'stress': 'stress',
                 'hessian': 'hessian',
+                'charge': 'charge',
             }.get(key)
             keys_to_keep.append(key)
             if key in model.output_properties:
