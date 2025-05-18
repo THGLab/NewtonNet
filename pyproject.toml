@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "NewtonNet"
 description = "A Newtonian message passing network for deep learning of interatomic potentials and forces"
-version = "2.0.2"
+version = "2.1.0"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
