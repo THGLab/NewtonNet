@@ -201,9 +201,9 @@ class ChargeOutput(DirectProperty):
 class EnergyAggregator(nn.Module):
     def __init__(self):
         super().__init__()
-        self.les = Les({
-            'use_atomwise': False,
-        })
+        self.les = Les()
+        del self.les.atomwise
+        del self.les.bec
 
     def forward(self, energy, outputs):
         if hasattr(outputs, 'charge'):
