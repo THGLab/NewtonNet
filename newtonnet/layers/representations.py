@@ -2,23 +2,105 @@ import torch
 from torch import nn
 
 
-def get_representation_by_string(cutoff, cutoff_network='poly', radial_network='bessel', n_basis=20):
-    representations = {}
-    representations['norm'] = ScaledNorm(r=cutoff)
+class EdgeEmbedding(nn.Module):
+    '''
+    Edge embedding layer of the network
 
-    if cutoff_network == 'poly':
-        representations['cutoff'] = PolynomialCutoff(p=9)
-    elif cutoff_network == 'cos':
-        representations['cutoff'] = CosineCutoff()
-    else:
-        raise NotImplementedError(f'The cutoff function {cutoff_network} is unknown.')
+    Parameters:
+        cutoff (float): cutoff radius.
+        n_basis (int): number of radial basis functions. Default: 20.
+    '''
+    def __init__(self, cutoff, n_basis=20):
+        super().__init__()
+        self.radius_graph = RadiusGraph(r=cutoff)
+        self.norm = ScaledNorm(r=cutoff)
+        self.envelope = PolynomialCutoff(p=9)
+        self.embedding = RadialBesselLayer(n_basis=n_basis)
+
+    def forward(self, pos, cell=None, batch=None):
+        """Compute edge embedding.
+
+        Args:
+            pos (torch.Tensor): positions of atoms.
+            cell (torch.Tensor, optional): cell vectors. Default: None.
+            batch (torch.Tensor, optional): batch indices. Default: None.
+
+        Returns:
+            edge_index (torch.Tensor): edge indices of the graph.
+            dist_edge (torch.Tensor): distance values of the edges.
+            dir_edge (torch.Tensor): direction values of the edges.
+
+        """
+        # Compute radius graph
+        edge_index, dist = self.radius_graph(pos, cell=cell, batch=batch)
+
+        # Compute distance and direction
+        dist_edge, dir_edge = self.norm(dist)
+
+        # Compute radial embedding
+        dist_edge = self.envelope(dist_edge) * self.embedding(dist_edge)
+
+        return dist_edge, dir_edge, edge_index
     
-    if radial_network == 'bessel':
-        representations['radial'] = RadialBesselLayer(n_basis=n_basis)
-    else:
-        raise NotImplementedError(f'The radial function {radial_network} is unknown.')
-    
-    return representations
+
+class RadiusGraph(nn.Module):
+    '''
+    Create a radius graph based on the interatomic distances.
+
+    Parameters:
+        r (float): cutoff radius.
+    '''
+    def __init__(self, r):
+        super().__init__()
+        self.r = r
+
+    def forward(self, pos, cell=None, batch=None):
+        """Compute radius graph.
+
+        Args:
+            pos (torch.Tensor): positions of atoms.
+            cell (torch.Tensor, optional): cell vectors. Default: None.
+            batch (torch.Tensor, optional): batch indices. Default: None.
+
+        Returns:
+            edge_index (torch.Tensor): edge indices of the graph.
+            disp (torch.Tensor): displacement vectors of the edges.
+
+        """
+        # Create full graph
+        n_node = pos.shape[0]
+        if batch is not None:
+            edge_index = []
+            for b in batch.unique():
+                nodes = (batch == b).nonzero().flatten()
+                row, col = torch.meshgrid(nodes, nodes, indexing='ij')
+                edge_index.append(torch.stack([row.flatten(), col.flatten()], dim=0))
+            edge_index = torch.cat(edge_index, dim=1)
+        else:
+            row, col = torch.meshgrid(torch.arange(n_node, dtype=pos.dtype), torch.arange(n_node, dtype=pos.dtype), indexing='ij')
+            edge_index = torch.stack([row.flatten(), col.flatten()], dim=0)
+        edge_index = edge_index[:, edge_index[0] != edge_index[1]]
+            
+        # Compute distances
+        dist = pos[edge_index[0]] - pos[edge_index[1]]
+        if cell is not None and not (cell == 0).all():
+            if batch is not None:
+                cell = cell[batch]
+            else:
+                cell = cell.repeat(n_node, 1, 1)
+            cell = cell[edge_index[0]]
+            scaled_dist = torch.linalg.solve(cell.transpose(1, 2), dist)
+            dist = dist - torch.bmm(cell, torch.round(scaled_dist).unsqueeze(-1)).squeeze(-1)
+
+        # Filter edges based on distance
+        mask = (dist.norm(dim=1) < self.r)
+        edge_index = edge_index[:, mask]
+        dist = dist[mask]
+
+        return edge_index, dist
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(r={self.r})'
 
 
 class ScaledNorm(nn.Module):
@@ -29,7 +111,7 @@ class ScaledNorm(nn.Module):
     Parameters:
         r (float): cutoff radius.
     '''
-    def __init__(self, r, **kwargs):
+    def __init__(self, r):
         super().__init__()
         self.r = r
 
@@ -40,8 +122,8 @@ class ScaledNorm(nn.Module):
             disp (torch.Tensor): values of interatomic distance vectors.
 
         Returns:
-            torch.Tensor: values of scaled norm.
-
+            dist (torch.Tensor): values of scaled interatomic distances.
+            dir (torch.Tensor): values of normalized interatomic distance vectors.
         """
         # Compute values of scaled norm
         dist = torch.norm(disp, dim=-1, keepdim=True)
@@ -49,6 +131,9 @@ class ScaledNorm(nn.Module):
         dist = dist / self.r
 
         return dist, dir
+    
+    def __repr__(self):
+        return f'{self.__class__.__name__}(r={self.r})'
 
 class PolynomialCutoff(nn.Module):
     '''
@@ -63,7 +148,7 @@ class PolynomialCutoff(nn.Module):
         y(0) = 1
         y(1) = 0
     '''
-    def __init__(self, p, **kwargs):
+    def __init__(self, p):
         super().__init__()
         self.p = p
 
@@ -84,6 +169,9 @@ class PolynomialCutoff(nn.Module):
             - 0.5 * self.p * (self.p + 1) * dist.pow(self.p + 2)
 
         return cutoffs
+    
+    def __repr__(self):
+        return f'{self.__class__.__name__}(p={self.p})'
 
 
 class CosineCutoff(nn.Module):
@@ -96,7 +184,7 @@ class CosineCutoff(nn.Module):
         y(0) = 1
         y(1) = 0
     '''
-    def __init__(self, **kwargs):
+    def __init__(self):
         super().__init__()
 
     def forward(self, dist):
@@ -110,7 +198,7 @@ class CosineCutoff(nn.Module):
 
         """
         # Compute values of cutoff function
-        cutoffs = 0.5 * (torch.cos(dist * np.pi) + 1.0)
+        cutoffs = 0.5 * (torch.cos(dist * torch.pi) + 1.0)
 
         return cutoffs
 
@@ -145,3 +233,6 @@ class RadialBesselLayer(nn.Module):
         out = torch.sin(self.frequencies * dist) / dist #/ self.frequencies
 
         return out
+    
+    def __repr__(self):
+        return f'{self.__class__.__name__}(basis={self.n_basis})'

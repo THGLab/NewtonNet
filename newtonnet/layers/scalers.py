@@ -1,38 +1,31 @@
 import torch
 from torch import nn
-from torch_geometric.utils import scatter
 
 
 def get_scaler_by_string(key):
     if key == 'energy':
-        scaler = ScaleShift(scale=True, shift=True)
+        scaler = ScaleShift(scale=1.0, shift=0.0)
     elif key == 'gradient_force':
-        scaler = ScaleShift(scale=False, shift=False)
+        scaler = ScaleShift(scale=None, shift=None)
     elif key == 'direct_force':
-        scaler = ScaleShift(scale=True, shift=False)
+        scaler = ScaleShift(scale=1.0, shift=None)
     elif key == 'hessian':
-        scaler = ScaleShift(scale=False, shift=False)
+        scaler = ScaleShift(scale=None, shift=None)
     elif key == 'virial':
-        scaler = ScaleShift(scale=False, shift=False)
+        scaler = ScaleShift(scale=None, shift=None)
+    elif key == 'stress':
+        scaler = ScaleShift(scale=None, shift=None)
+    elif key == 'charge':
+        scaler = ScaleShift(scale=0.1, shift=0.0)
     else:
         raise NotImplementedError(f'Scaler type {key} is not implemented yet')
     return scaler
 
 def set_scaler_by_string(key, scaler, stats, fit_scale=True, fit_shift=True):
-    if key == 'energy':
-        if fit_scale:
-            scaler.set_scale(stats['energy']['scale'])
-        if fit_shift:
-            scaler.set_shift(stats['energy']['shift'])
-    elif key == 'gradient_force':
-        pass
-    elif key == 'direct_force':
-        if fit_scale:
-            scaler.set_scale(stats['force']['scale'])
-    # elif scaler.key == 'hessian':
-    #     pass
-    else:
-        raise NotImplementedError(f'Scaler type {key} is not implemented yet')
+    if scaler.scale is not None and key in stats and fit_scale:
+        scaler.set_scale(stats[key]['scale'])
+    if scaler.shift is not None and key in stats and fit_shift:
+        scaler.set_shift(stats[key]['shift'])
     return scaler
 
 class ScaleShift(nn.Module):
@@ -44,10 +37,10 @@ class ScaleShift(nn.Module):
         scale (bool): Whether to scale the output.
         shift (bool): Whether to shift the output.
     '''
-    def __init__(self, scale=True, shift=True):
+    def __init__(self, scale=None, shift=None):
         super().__init__()
-        self.scale = nn.Embedding.from_pretrained(torch.ones(118 + 1, 1), freeze=False, padding_idx=0) if scale else None
-        self.shift = nn.Embedding.from_pretrained(torch.zeros(118 + 1, 1), freeze=False, padding_idx=0) if shift else None
+        self.scale = nn.Embedding.from_pretrained(torch.ones(118 + 1, 1), freeze=False, padding_idx=0) if scale is not None else None
+        self.shift = nn.Embedding.from_pretrained(torch.zeros(118 + 1, 1), freeze=False, padding_idx=0) if shift is not None else None
 
     def forward(self, output, outputs):
         '''

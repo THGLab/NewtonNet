@@ -23,12 +23,9 @@ class MLAseCalculator(Calculator):
     def __init__(
             self, 
             model_path: str,
-            properties: list = ['energy', 'free_energy', 'forces'], 
-            disagreement: str = None,
-            device: str | list[str] = 'cpu',
+            properties: list = None, 
+            device: str = None,
             precision: str = 'float32',
-            script: bool = False,
-            trace_n_atoms: int = 0,
             **kwargs,
             ):
         """
@@ -36,120 +33,78 @@ class MLAseCalculator(Calculator):
 
         Parameters:
             model_path (str): The path to the model.
-            settings_path (str): The path to the settings.
             properties (list): The properties to be predicted. Default: ['energy', 'free_energy', 'forces'].
-            disagreement (str): The type of disagreement to be calculated. Default: None.
             device (str): The device for the calculator. Default: 'cpu'.
             precision (str): The precision of the calculator. Default: 'float32'.
-            script (bool): Whether to script the model. Default: False.
-            trace_n_atoms (int): The number of atoms to be traced. Default: 0.
         """
         Calculator.__init__(self, **kwargs)
 
-        if type(device) is list:
-            self.device = [torch.device(item) for item in device]
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
-            self.device = [torch.device(device)]
+            self.device = torch.device(device)
         self.dtype = get_precision_by_string(precision)
 
-        self.models = []
-        self.properties = properties
-        if isinstance(model_path, list):
-            self.models = [self.load_model(model) for model in model_path]
-        else:
-            self.models = [self.load_model(model_path)]
-        
-        self.radius_graph = RadiusGraph(self.models[0].embedding_layer.norm.r)
-        
-        self.script = script
-        self.trace_n_atoms = trace_n_atoms
-        self.disagreement = disagreement
+        self.properties = properties if properties is not None else self.implemented_properties
+        self.model = self.load_model(model_path)
         
 
-    def calculate(self, atoms=None, properties=['energy', 'forces', 'stress'], system_changes=None):
+    def calculate(self, atoms=None, properties=None, system_changes=None):
         super().calculate(atoms, self.properties, system_changes)
         if isinstance(atoms, Atoms):
             atoms = [atoms]
         data = self.format_data(atoms)
-        n_models, n_frames, n_atoms = len(self.models), len(atoms), len(atoms[0])
+        n_frames, n_atoms = len(atoms), len(atoms[0])
 
-        preds = {}
+        pred = self.model(data.z, data.pos, data.cell, data.batch)
         if 'energy' in self.properties:
-            preds['energy'] = np.zeros((n_models, n_frames))
+            energy = pred.energy.cpu().detach().numpy()
+            self.results['energy'] = energy.squeeze()
         if 'free_energy' in self.properties:
-            preds['free_energy'] = np.zeros((n_models, n_frames))
+            energy = pred.energy.cpu().detach().numpy()
+            self.results['free_energy'] = energy.squeeze()
         if 'forces' in self.properties:
-            preds['forces'] = np.zeros((n_models, n_frames, n_atoms, 3))
+            force = pred.gradient_force.cpu().detach().numpy()
+            self.results['forces'] = force.reshape(n_frames, n_atoms, 3).squeeze()
         if 'hessian' in self.properties:
-            preds['hessian'] = np.zeros((n_models, n_frames, n_atoms, 3, n_atoms, 3))
+            hessian = pred.hessian.cpu().detach().numpy()
+            self.results['hessian'] = hessian.reshape(n_frames, n_atoms, 3, n_atoms, 3).squeeze()
         if 'stress' in self.properties:
-            preds['stress'] = np.zeros((n_models, n_frames, 6))
-        for model_, model in enumerate(self.models):
-            pred = model(data.z, data.disp, data.edge_index, data.batch)
-            if 'energy' in self.properties:
-                energy = pred.energy.cpu().detach().numpy()
-                preds['energy'][model_] = energy
-            if 'free_energy' in self.properties:
-                energy = pred.energy.cpu().detach().numpy()
-                preds['free_energy'][model_] = energy
-            if 'forces' in self.properties:
-                force = pred.gradient_force.cpu().detach().numpy()
-                preds['forces'][model_] = force.reshape(n_frames, n_atoms, 3)
-            if 'hessian' in self.properties:
-                hessian = pred.hessian.cpu().detach().numpy()
-                preds['hessian'][model_] = hessian.reshape(n_frames, n_atoms, 3, n_atoms, 3)
-            if 'stress' in self.properties:
-                virial = pred.virial.cpu().detach().numpy()
-                volume = np.array([atoms[frame].get_volume() for frame in range(n_frames)])
-                stress = -virial[:, [0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]] / volume[:, None] / 2
-                preds['stress'][model_] = stress
-            del pred
-
-        # self.results['outlier'] = self.q_test(preds['energy'])
-        for key in self.properties:
-            # self.results[key] = self.remove_outlier(preds[key], self.results['outlier']).mean(axis=0)
-            self.results[key] = preds[key].mean(axis=0).squeeze()
-
-            # if self.disagreement == 'std':
-            #     self.results[key + '_disagreement'] = preds[key].std(axis=0).max()
-            # elif self.disagreement == 'std_outlierremoval':
-            #     self.results[key + '_disagreement'] = self.remove_outlier(preds[key], self.results['outlier']).std(axis=0).max()
-            # elif self.disagreement == 'range':
-            #     self.results[key + '_disagreement'] = (preds[key].max(axis=0) - preds[key].min(axis=0)).max()
-            # elif self.disagreement == 'values':
-            #     self.results[key + '_disagreement'] = preds[key]
-            del preds[key]
+            stress = pred.stress.cpu().detach().numpy()
+            self.results['stress'] = stress[:, [0, 1, 2, 1, 0, 0], [0, 1, 2, 2, 2, 1]].squeeze()
+        del pred
 
     def load_model(self, model):
         # TODO: Load model with only weights
         if model in ['ani1', 'ani1x', 't1x']:
             model = download_checkpoint(model)
-        model = torch.load(model, map_location=self.device[0], weights_only=False)
+        model = torch.load(model, map_location=self.device, weights_only=False)
         keys_to_keep = ['energy']
         for key in self.properties:
             key = {
                 'energy': 'energy',
                 'free_energy': 'energy',
                 'forces': 'gradient_force',
-                'stress': 'virial',
+                'stress': 'stress',
                 'hessian': 'hessian',
+                'charge': 'charge',
             }.get(key)
             keys_to_keep.append(key)
-            if key in model.infer_properties:
+            if key in model.output_properties:
                 continue
-            model.infer_properties.append(key)
+            model.output_properties.append(key)
             model.output_layers.append(get_output_by_string(key))
             model.scalers.append(get_scaler_by_string(key))
             model.aggregators.append(get_aggregator_by_string(key))
-        ids_to_remove = [i for i, key in enumerate(model.infer_properties) if key not in keys_to_keep]
+        ids_to_remove = [i for i, key in enumerate(model.output_properties) if key not in keys_to_keep]
         for i in reversed(ids_to_remove):
-            model.infer_properties.pop(i)
+            model.output_properties.pop(i)
             model.output_layers.pop(i)
             model.scalers.pop(i)
             model.aggregators.pop(i)
         model.to(self.dtype)
         model.eval()
-        model.embedding_layer.requires_dr = any(isinstance(layer, DerivativeProperty) for layer in model.output_layers)
+        model.embedding_layers.requires_dr = any(isinstance(layer, DerivativeProperty) for layer in model.output_layers)
         if any(isinstance(layer, SecondDerivativeProperty) for layer in model.output_layers):
             for layer in model.output_layers:
                 if isinstance(layer, DerivativeProperty):
@@ -159,11 +114,12 @@ class MLAseCalculator(Calculator):
     def format_data(self, atoms_list):
         data_list = []
         for atoms in atoms_list:
-            z = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long, device=self.device[0])
-            pos = torch.tensor(atoms.get_positions(wrap=True), dtype=self.dtype, device=self.device[0])
-            cell = torch.tensor(atoms.get_cell().array, dtype=self.dtype, device=self.device[0])
-            data = Data(pos=pos, z=z, cell=cell)
-            data = self.radius_graph(data)
+            z = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long, device=self.device)
+            pos = torch.tensor(atoms.get_positions(wrap=True), dtype=self.dtype, device=self.device)
+            cell = torch.tensor(atoms.get_cell().array, dtype=self.dtype, device=self.device)
+            pbc = torch.tensor(atoms.get_pbc(), dtype=torch.bool, device=self.device)
+            cell[~pbc] = 0.0
+            data = Data(pos=pos, z=z, cell=cell.reshape(1, 3, 3))
             data_list.append(data)
         batch = Batch.from_data_list(data_list)
         return batch
