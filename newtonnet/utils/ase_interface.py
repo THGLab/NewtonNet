@@ -16,7 +16,7 @@ from newtonnet.utils.pretrained_models import download_checkpoint
 ##     ML model ASE interface
 ##--------------------------------------
 class MLAseCalculator(Calculator):
-    implemented_properties = ['energy', 'free_energy', 'forces', 'hessian', 'stress']
+    implemented_properties = ['charges', 'energy', 'free_energy', 'forces', 'hessian', 'stress']
     # note that the free_energy is not the Gibbs/Helmholtz free energy, but the potential energy in the ASE calculator, how confusing
 
     ### Constructor ###
@@ -33,8 +33,8 @@ class MLAseCalculator(Calculator):
 
         Parameters:
             model_path (str): The path to the model.
-            properties (list): The properties to be predicted. Default: ['energy', 'free_energy', 'forces'].
-            device (str): The device for the calculator. Default: 'cpu'.
+            properties (list): The properties to be predicted. Default: ['charges', 'energy', 'free_energy', 'forces', 'stress'].
+            device (str): The device for the calculator.
             precision (str): The precision of the calculator. Default: 'float32'.
         """
         Calculator.__init__(self, **kwargs)
@@ -45,7 +45,7 @@ class MLAseCalculator(Calculator):
             self.device = torch.device(device)
         self.dtype = get_precision_by_string(precision)
 
-        self.properties = properties if properties is not None else self.implemented_properties
+        self.properties = properties
         self.model = self.load_model(model_path)
         
 
@@ -57,6 +57,9 @@ class MLAseCalculator(Calculator):
         n_frames, n_atoms = len(atoms), len(atoms[0])
 
         pred = self.model(data.z, data.pos, data.cell, data.batch)
+        if 'charges' in self.properties:
+            charge = pred.charge.cpu().detach().numpy()
+            self.results['charges'] = charge.reshape(n_frames, n_atoms).squeeze()
         if 'energy' in self.properties:
             energy = pred.energy.cpu().detach().numpy()
             self.results['energy'] = energy.squeeze()
@@ -79,28 +82,38 @@ class MLAseCalculator(Calculator):
         if model in ['ani1', 'ani1x', 't1x']:
             model = download_checkpoint(model)
         model = torch.load(model, map_location=self.device, weights_only=False)
-        keys_to_keep = ['energy']
-        for key in self.properties:
-            key = {
-                'energy': 'energy',
-                'free_energy': 'energy',
-                'forces': 'gradient_force',
-                'stress': 'stress',
-                'hessian': 'hessian',
-                'charge': 'charge',
-            }.get(key)
-            keys_to_keep.append(key)
-            if key in model.output_properties:
-                continue
-            model.output_properties.append(key)
-            model.output_layers.append(get_output_by_string(key))
-            model.scalers.append(get_scaler_by_string(key))
-            model.aggregators.append(get_aggregator_by_string(key))
-        ids_to_remove = [i for i, key in enumerate(model.output_properties) if key not in keys_to_keep]
-        for i in reversed(ids_to_remove):
-            model.output_properties.pop(i)
-            model.output_layers.pop(i)
-            model.scalers.pop(i)
+        if self.properties is None:
+            self.properties = []
+            for key in model.output_properties:
+                key = {
+                    'charge': 'charges',
+                    'energy': 'energy',
+                    'gradient_force': 'forces',
+                }.get(key)
+                self.properties.append(key)
+        else:
+            keys_to_keep = ['charges', 'energy']
+            for key in self.properties:
+                key = {
+                    'charges': 'charge',
+                    'energy': 'energy',
+                    'free_energy': 'energy',
+                    'forces': 'gradient_force',
+                    'stress': 'stress',
+                    'hessian': 'hessian',
+                }.get(key)
+                keys_to_keep.append(key)
+                if key in model.output_properties:
+                    continue
+                model.output_properties.append(key)
+                model.output_layers.append(get_output_by_string(key))
+                model.scalers.append(get_scaler_by_string(key))
+                model.aggregators.append(get_aggregator_by_string(key))
+            ids_to_remove = [i for i, key in enumerate(model.output_properties) if key not in keys_to_keep]
+            for i in reversed(ids_to_remove):
+                model.output_properties.pop(i)
+                model.output_layers.pop(i)
+                model.scalers.pop(i)
             model.aggregators.pop(i)
         model.to(self.dtype)
         model.eval()
