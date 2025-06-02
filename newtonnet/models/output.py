@@ -20,6 +20,8 @@ def get_output_by_string(key, n_features=None, activation=None):
         output_layer = StressOutput()
     elif key == 'charge':
         output_layer = ChargeOutput(n_features, activation)
+    elif key == 'bec':
+        output_layer = BornEffectiveChargeOutput()
     else:
         raise NotImplementedError(f'Output type {key} is not implemented yet')
     return output_layer
@@ -38,6 +40,8 @@ def get_aggregator_by_string(key):
     elif key == 'stress':
         aggregator = NullAggregator()
     elif key == 'charge':
+        aggregator = NullAggregator()
+    elif key == 'bec':
         aggregator = NullAggregator()
     else:
         raise NotImplementedError(f'Aggregate type {key} is not implemented yet')
@@ -197,6 +201,27 @@ class ChargeOutput(DirectProperty):
         charge = self.layers(outputs.atom_node)
         return charge
     
+class BornEffectiveChargeOutput(SecondDerivativeProperty):
+    '''
+    Born effective charge prediction
+    '''
+    def __init__(self):
+        super().__init__()
+        self.les = Les()
+        del self.les.atomwise
+        del self.les.ewald
+
+    def forward(self, outputs):
+        bec = self.les(
+            positions=outputs.pos,
+            cell=outputs.cell,
+            latent_charges=outputs.charge,
+            batch=outputs.batch,
+            compute_energy=False,
+            compute_bec=True,
+        )['BEC']
+        return bec
+    
 
 class EnergyAggregator(nn.Module):
     def __init__(self):
@@ -213,6 +238,8 @@ class EnergyAggregator(nn.Module):
                 cell=outputs.cell,
                 latent_charges=outputs.charge,
                 batch=outputs.batch,
+                compute_energy=True,
+                compute_bec=False,
             )['E_lr']
             return energy_sr + energy_lr
         else:
