@@ -177,6 +177,7 @@ def parse_xyz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
         cell[~pbc] = 0.0
         energy = torch.tensor(atoms.get_potential_energy(), dtype=precision)
         forces = torch.from_numpy(atoms.get_forces()).to(precision)
+        charges = torch.from_numpy(atoms.get_initial_charges()).to(precision)
 
         data = Data()
         data.z = z.reshape(-1)
@@ -184,6 +185,7 @@ def parse_xyz(raw_path: str, pre_transform: Callable, pre_filter: Callable, prec
         data.cell = cell.reshape(1, 3, 3) * units['length']
         data.energy = energy.reshape(1) * units['energy']
         data.force = forces.reshape(-1, 3) * units['energy'] / units['length']
+        data.charge = charges.reshape(-1)
 
         if pre_filter is not None and not pre_filter(data):
             continue
@@ -207,7 +209,7 @@ class MolecularStatistics(nn.Module):
 
         batch = data.batch.cpu()
 
-        try:
+        if hasattr(data, 'energy'):
             energy = data.energy.cpu()
             formula = scatter(nn.functional.one_hot(z), batch, dim=0).to(energy.dtype)
             solution = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
@@ -217,14 +219,18 @@ class MolecularStatistics(nn.Module):
             energy_scale = torch.ones(118 + 1, dtype=energy.dtype, device=energy.device)
             energy_scale[z_unique] = stds
             stats['energy'] = {'shift': energy_shifts, 'scale': energy_scale}
-        except AttributeError:
-            pass
-        try:
+        if hasattr(data, 'force'):
             force = data.force.norm(dim=-1).cpu()
             means = scatter(force, z, reduce='mean')
             force_scale = torch.ones(118 + 1, dtype=force.dtype, device=force.device)
             force_scale[z_unique] = means[z_unique]
             stats['force'] = {'scale': force_scale}
-        except AttributeError:
-            pass
+        if hasattr(data, 'charge'):
+            charge = data.charge.cpu()
+            means = scatter(charge, z, reduce='mean')
+            charge_shifts = torch.zeros(118 + 1, dtype=charge.dtype, device=charge.device)
+            charge_shifts[z_unique] = means[z_unique]
+            stats['charge'] = {'shift': charge_shifts}
+        print(stats)
+        raise NotImplementedError('MolecularStatistics is not implemented for this dataset type.')
         return stats
