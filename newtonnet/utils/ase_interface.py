@@ -16,7 +16,7 @@ from newtonnet.utils.pretrained_models import download_checkpoint
 ##     ML model ASE interface
 ##--------------------------------------
 class MLAseCalculator(Calculator):
-    implemented_properties = ['charges', 'energy', 'free_energy', 'forces', 'hessian', 'stress']
+    implemented_properties = ['charges', 'bec', 'energy', 'free_energy', 'forces', 'hessian', 'stress']
     # note that the free_energy is not the Gibbs/Helmholtz free energy, but the potential energy in the ASE calculator, how confusing
 
     ### Constructor ###
@@ -33,7 +33,7 @@ class MLAseCalculator(Calculator):
 
         Parameters:
             model_path (str): The path to the model.
-            properties (list): The properties to be predicted. Default: ['charges', 'energy', 'free_energy', 'forces', 'stress'].
+            properties (list): The properties to be predicted. Default: model.output_properties.
             device (str): The device for the calculator.
             precision (str): The precision of the calculator. Default: 'float32'.
         """
@@ -60,6 +60,9 @@ class MLAseCalculator(Calculator):
         if 'charges' in self.properties:
             charge = pred.charge.cpu().detach().numpy()
             self.results['charges'] = charge.reshape(n_frames, n_atoms).squeeze()
+        if 'bec' in self.properties:
+            bec = pred.bec.cpu().detach().numpy()
+            self.results['bec'] = bec.reshape(n_frames, n_atoms, 3, 3).squeeze()
         if 'energy' in self.properties:
             energy = pred.energy.cpu().detach().numpy()
             self.results['energy'] = energy.squeeze()
@@ -92,10 +95,11 @@ class MLAseCalculator(Calculator):
                 }.get(key)
                 self.properties.append(key)
         else:
-            keys_to_keep = ['charges', 'energy']
+            keys_to_keep = ['charge', 'energy']
             for key in self.properties:
                 key = {
                     'charges': 'charge',
+                    'bec': 'bec',
                     'energy': 'energy',
                     'free_energy': 'energy',
                     'forces': 'gradient_force',
@@ -114,7 +118,7 @@ class MLAseCalculator(Calculator):
                 model.output_properties.pop(i)
                 model.output_layers.pop(i)
                 model.scalers.pop(i)
-            model.aggregators.pop(i)
+                model.aggregators.pop(i)
         model.to(self.dtype)
         model.eval()
         model.embedding_layers.requires_dr = any(isinstance(layer, DerivativeProperty) for layer in model.output_layers)

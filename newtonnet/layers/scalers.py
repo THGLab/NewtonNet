@@ -17,6 +17,8 @@ def get_scaler_by_string(key):
         scaler = ScaleShift(scale=None, shift=None)
     elif key == 'charge':
         scaler = ScaleShift(scale=0.1, shift=0.0)
+    elif key == 'bec':
+        scaler = ScaleShift(scale=None, shift=None)
     else:
         raise NotImplementedError(f'Scaler type {key} is not implemented yet')
     return scaler
