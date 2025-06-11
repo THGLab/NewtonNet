@@ -24,9 +24,9 @@ def get_scaler_by_string(key):
     return scaler
 
 def set_scaler_by_string(key, scaler, stats, fit_scale=True, fit_shift=True):
-    if scaler.scale is not None and key in stats and fit_scale:
+    if (scaler.scale is not None) and (key in stats) and ('scale' in stats[key]) and fit_scale:
         scaler.set_scale(stats[key]['scale'])
-    if scaler.shift is not None and key in stats and fit_shift:
+    if (scaler.shift is not None) and (key in stats) and ('shift' in stats[key]) and fit_shift:
         scaler.set_shift(stats[key]['shift'])
     return scaler
 
@@ -41,8 +41,8 @@ class ScaleShift(nn.Module):
     '''
     def __init__(self, scale=None, shift=None):
         super().__init__()
-        self.scale = nn.Embedding.from_pretrained(torch.ones(118 + 1, 1), freeze=False, padding_idx=0) if scale is not None else None
-        self.shift = nn.Embedding.from_pretrained(torch.zeros(118 + 1, 1), freeze=False, padding_idx=0) if shift is not None else None
+        self.scale = nn.Embedding.from_pretrained(torch.ones(118 + 1, 1) * scale, freeze=False, padding_idx=0) if scale is not None else None
+        self.shift = nn.Embedding.from_pretrained(torch.ones(118 + 1, 1) * shift, freeze=False, padding_idx=0) if shift is not None else None
 
     def forward(self, output, outputs):
         '''

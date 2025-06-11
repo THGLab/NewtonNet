@@ -231,6 +231,4 @@ class MolecularStatistics(nn.Module):
             charge_shifts = torch.zeros(118 + 1, dtype=charge.dtype, device=charge.device)
             charge_shifts[z_unique] = means[z_unique]
             stats['charge'] = {'shift': charge_shifts}
-        print(stats)
-        raise NotImplementedError('MolecularStatistics is not implemented for this dataset type.')
         return stats
