@@ -45,6 +45,10 @@ def get_loss_by_string(losses):
             eval_losses.append(DirectForceLoss(mode='mse', transform='cos'))
             eval_losses.append(DirectForceLoss(mode='mae', transform='norm'))
             eval_losses.append(DirectForceLoss(mode='mse', transform='norm'))
+        elif key == 'charge':
+            main_losses.append(ChargeLoss(**kwargs))
+            eval_losses.append(ChargeLoss(mode='mae'))
+            eval_losses.append(ChargeLoss(mode='mse'))
         else:
             raise ValueError(f'loss {key} not implemented')
         main_loss = lambda pred, data: sum([loss_fn(pred, data) for loss_fn in main_losses])
@@ -149,3 +153,14 @@ class DirectForceLoss(BaseLoss):
             
     def from_outputs(self, pred, data):
         return pred.direct_force, data.force
+    
+class ChargeLoss(BaseLoss):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if self.transform is None:
+            self.name = f'charge_{self.mode}'
+        else:
+            raise ValueError(f'transform {self.transform} for charge not implemented')
+
+    def from_outputs(self, pred, data):
+        return pred.charge, data.charge
