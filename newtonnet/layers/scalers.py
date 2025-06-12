@@ -4,7 +4,7 @@ from torch import nn
 
 def get_scaler_by_string(key):
     if key == 'energy':
-        scaler = ScaleShift(scale=0.0, shift=0.0)
+        scaler = ScaleShift(scale=1.0, shift=0.0)
     elif key == 'gradient_force':
         scaler = ScaleShift(scale=None, shift=None)
     elif key == 'direct_force':
