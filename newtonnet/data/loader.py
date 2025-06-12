@@ -216,12 +216,13 @@ class MolecularStatistics(nn.Module):
             solution = torch.linalg.lstsq(formula, energy, driver='gelsd').solution
             energy_shifts = torch.zeros(118 + 1, dtype=energy.dtype, device=energy.device)
             energy_shifts[z_unique] = solution[z_unique]
-            stds = ((energy - torch.matmul(formula, solution)).square().sum() / (formula).sum()).sqrt()
-            energy_scale = torch.ones(118 + 1, dtype=energy.dtype, device=energy.device)
-            energy_scale[z_unique] = stds
-            stats['energy'] = {'shift': energy_shifts, 'scale': energy_scale}
+            # stds = ((energy - torch.matmul(formula, solution)).square().sum() / (formula).sum()).sqrt()
+            # energy_scale = torch.ones(118 + 1, dtype=energy.dtype, device=energy.device)
+            # energy_scale[z_unique] = stds
+            # stats['energy'] = {'shift': energy_shifts, 'scale': energy_scale}
+            stats['energy'] = {'shift': energy_shifts}
             print(f'  Energy shifts: {energy_shifts[z_unique].tolist()} for atomic numbers {z_unique.tolist()}')
-            print(f'  Energy scales: {energy_scale[z_unique].tolist()} for atomic numbers {z_unique.tolist()}')
+            # print(f'  Energy scales: {energy_scale[z_unique].tolist()} for atomic numbers {z_unique.tolist()}')
         if hasattr(data, 'force'):
             force = data.force.norm(dim=-1).cpu()
             means = scatter(force, z, reduce='mean')
