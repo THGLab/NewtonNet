@@ -209,6 +209,7 @@ class MolecularStatistics(nn.Module):
 
         batch = data.batch.cpu()
 
+        print('Stats:')
         if hasattr(data, 'energy'):
             energy = data.energy.cpu()
             formula = scatter(nn.functional.one_hot(z), batch, dim=0).to(energy.dtype)
@@ -219,16 +220,20 @@ class MolecularStatistics(nn.Module):
             energy_scale = torch.ones(118 + 1, dtype=energy.dtype, device=energy.device)
             energy_scale[z_unique] = stds
             stats['energy'] = {'shift': energy_shifts, 'scale': energy_scale}
+            print(f'  Energy shifts: {energy_shifts[z_unique].tolist()} for atomic numbers {z_unique.tolist()}')
+            print(f'  Energy scales: {energy_scale[z_unique].tolist()} for atomic numbers {z_unique.tolist()}')
         if hasattr(data, 'force'):
             force = data.force.norm(dim=-1).cpu()
             means = scatter(force, z, reduce='mean')
             force_scale = torch.ones(118 + 1, dtype=force.dtype, device=force.device)
             force_scale[z_unique] = means[z_unique]
             stats['force'] = {'scale': force_scale}
+            print(f'  Force scales: {force_scale[z_unique].tolist()} for atomic numbers {z_unique.tolist()}')
         if hasattr(data, 'charge'):
             charge = data.charge.cpu()
             means = scatter(charge, z, reduce='mean')
             charge_shifts = torch.zeros(118 + 1, dtype=charge.dtype, device=charge.device)
             charge_shifts[z_unique] = means[z_unique]
             stats['charge'] = {'shift': charge_shifts}
+            print(f'  Charge shifts: {charge_shifts[z_unique].tolist()} for atomic numbers {z_unique.tolist()}')
         return stats
