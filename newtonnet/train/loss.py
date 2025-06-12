@@ -45,6 +45,8 @@ def get_loss_by_string(losses):
             eval_losses.append(DirectForceLoss(mode='mse', transform='cos'))
             eval_losses.append(DirectForceLoss(mode='mae', transform='norm'))
             eval_losses.append(DirectForceLoss(mode='mse', transform='norm'))
+        else:
+            raise ValueError(f'loss {key} not implemented')
         main_loss = lambda pred, data: sum([loss_fn(pred, data) for loss_fn in main_losses])
         eval_loss = lambda pred, data: {loss_fn.name: loss_fn(pred, data) for loss_fn in eval_losses}
     return main_loss, eval_loss
