@@ -110,14 +110,15 @@ class MLAseCalculator(Calculator):
             # self.results[key] = self.remove_outlier(preds[key], self.results['outlier']).mean(axis=0)
             self.results[key] = preds[key].mean(axis=0).squeeze()
 
-            # if self.disagreement == 'std':
-            #     self.results[key + '_disagreement'] = preds[key].std(axis=0).max()
-            # elif self.disagreement == 'std_outlierremoval':
-            #     self.results[key + '_disagreement'] = self.remove_outlier(preds[key], self.results['outlier']).std(axis=0).max()
-            # elif self.disagreement == 'range':
-            #     self.results[key + '_disagreement'] = (preds[key].max(axis=0) - preds[key].min(axis=0)).max()
-            # elif self.disagreement == 'values':
-            #     self.results[key + '_disagreement'] = preds[key]
+            if self.disagreement == 'std':
+                self.results[key + '_disagreement'] = preds[key].std(axis=0).max()
+            elif self.disagreement == 'std_outlierremoval':
+                self.results[key + '_disagreement'] = self.remove_outlier(preds[key], self.results['outlier']).std(axis=0).max()
+            elif self.disagreement == 'range':
+                self.results[key + '_disagreement'] = (preds[key].max(axis=0) - preds[key].min(axis=0)).max()
+            elif self.disagreement == 'values':
+                self.results[key + '_disagreement'] = preds[key]
+
             del preds[key]
 
     def load_model(self, model):
