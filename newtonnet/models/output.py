@@ -4,6 +4,7 @@ from torch.autograd import grad
 from torch_geometric.utils import scatter
 
 from newtonnet.layers.scalers import ScaleShift
+from newtonnet.layers.zbl import ZBLBasis
 
 
 
@@ -86,9 +87,11 @@ class EnergyOutput(DirectProperty):
             activation,
             nn.Linear(n_features, 1),
             )
+        # self.baseline = ZBLBasis()
 
     def forward(self, outputs):
         energy = self.layers(outputs.atom_node)
+        # energy += self.baseline(outputs.z, outputs.disp, outputs.edge_index)
         # energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
         # outputs.energy = energy
         return energy
