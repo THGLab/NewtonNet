@@ -91,7 +91,7 @@ class EnergyOutput(DirectProperty):
 
     def forward(self, outputs):
         energy = self.layers(outputs.atom_node)
-        # energy += self.baseline(outputs.z, outputs.disp, outputs.edge_index)
+        energy += self.baseline(outputs.z, outputs.disp, outputs.edge_index)
         # energy = scatter(energy, outputs.batch, dim=0, reduce='sum').reshape(-1)
         # outputs.energy = energy
         return energy
