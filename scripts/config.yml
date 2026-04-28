@@ -46,6 +46,7 @@ training:
     energy:    # config of the energy loss
       weight: 1.0    # weight of the energy loss
       mode: mse    # loss mode; mse, mae, or huber
+      per_atom: true    # normalize energy loss by number of atoms
     gradient_force:    # config of the gradient force loss
       weight: 50.0    # weight of the gradient force loss
       mode: mse    # loss mode; mse, mae, or huber
