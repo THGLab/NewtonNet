@@ -14,7 +14,7 @@ echo "Unzipping..."
 unzip -p electrolyte_data/electrolyte.xyz.zip > electrolyte_data/electrolyte.xyz
 
 echo "Splitting into train/test..."
-$SCRATCH/code/les/nnpackages/newtonnet/bin/python - <<'EOF'
+python - <<'EOF'
 with open('electrolyte_data/electrolyte.xyz') as f:
     lines = f.readlines()
 
