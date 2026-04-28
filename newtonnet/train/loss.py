@@ -28,7 +28,11 @@ def get_loss_by_string(losses):
     assert losses is not None, 'losses is not defined.'
     for key, kwargs in losses.items():
         if key == 'energy':
-            main_losses.append(EnergyLoss(**kwargs))
+            per_atom = kwargs.pop('per_atom', False)
+            if per_atom:
+                main_losses.append(EnergyPerAtomLoss(**kwargs))
+            else:
+                main_losses.append(EnergyLoss(**kwargs))
             eval_losses.append(EnergyLoss(mode='mae'))
             eval_losses.append(EnergyLoss(mode='mse'))
             eval_losses.append(EnergyPerAtomLoss(mode='mae'))
